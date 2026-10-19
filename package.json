@@ -1,7 +1,7 @@
 {
-    "name": "keil-assistant",
-    "displayName": "Keil Assistant",
-    "description": "An assistant for Keil uVision",
+    "name": "keil-assistant-2026",
+    "displayName": "Keil Assistant 2026",
+    "description": "An assistant for Keil uVision - 2026 fork",
     "version": "1.7.0",
     "publisher": "cl",
     "author": {
@@ -40,7 +40,7 @@
     "contributes": {
         "configuration": [
             {
-                "title": "Keil Assistant",
+                "title": "Keil Assistant 2026",
                 "properties": {
                     "KeilAssistant.C51.Uv4Path": {
                         "type": "string",
@@ -227,7 +227,8 @@
             "explorer": [
                 {
                     "id": "project",
-                    "name": "Keil uVision Project"
+                    "icon":"",
+                    "name": "Keil uVision 2026 Project"
                 }
             ]
         },
