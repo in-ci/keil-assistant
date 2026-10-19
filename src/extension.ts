@@ -6,10 +6,12 @@ import * as fs from "fs";
 import * as node_path from "path";
 import * as child_process from "child_process";
 // import * as vscodeVariables from 'vscode-variables';
-const vscodeVariables: (
+import vscodeVariablesModule = require("vscode-variables");
+
+const vscodeVariables = vscodeVariablesModule as unknown as (
   value: string,
   recursive?: boolean,
-) => string = require("vscode-variables");
+) => string;
 
 import { File } from "../lib/node_utility/File";
 import { ResourceManager } from "./ResourceManager";
@@ -164,14 +166,11 @@ class Source implements IView {
     this.label = this.file.name;
     this.tooltip = f.path;
 
-    let iconName = "";
-    if (f.IsFile() === false) {
-      iconName = "FileWarning_16x";
-    } else if (_enable === false) {
-      iconName = "FileExclude_16x";
-    } else {
-      iconName = this.getIconBySuffix(f.suffix.toLowerCase());
-    }
+    const iconName = !f.IsFile()
+      ? "FileWarning_16x"
+      : !_enable
+        ? "FileExclude_16x"
+        : this.getIconBySuffix(f.suffix.toLowerCase());
 
     this.icons = {
       dark: iconName,
@@ -945,7 +944,7 @@ class C51Target extends Target {
 class MacroHandler {
   private regMatchers = {
     normal_macro: /^#define (\w+) (.*)$/,
-    func_macro: /^#define (\w+\([^\)]*\)) (.*)$/,
+    func_macro: /^#define (\w+\([^)]*\)) (.*)$/,
   };
 
   toExpression(macro: string): string | undefined {
@@ -1121,13 +1120,13 @@ class ArmTarget extends Target {
     const resultList: Set<string> = new Set();
 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-      let _line = lines[lineIndex];
+      const _line = lines[lineIndex];
 
-      let line =
+      const line =
         _line[_line.length - 1] === "\\"
           ? _line.substring(0, _line.length - 1)
           : _line; // remove char '\'
-      let subLines = line.trim().split(/(?<![\\:]) /);
+      const subLines = line.trim().split(/(?<![\\:]) /);
 
       if (lineIndex === 0) // first line
       {
@@ -1153,7 +1152,7 @@ class ArmTarget extends Target {
     const resultList: Set<string> = new Set<string>();
 
     for (let i = startIndex; i < lines.length; i++) {
-      let sepIndex = lines[i].indexOf(": ");
+      const sepIndex = lines[i].indexOf(": ");
       if (sepIndex > 0) {
         const line: string = lines[i].substring(sepIndex + 1).trim();
         resultList.add(line);
@@ -1386,7 +1385,10 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
       nPrj.on("dataChanged", () => this.updateView());
       this.prjList.set(nPrj.prjID, nPrj);
 
-      if (this.currentActiveProject == undefined) {
+      if (
+        this.currentActiveProject === undefined ||
+        this.currentActiveProject === null
+      ) {
         this.currentActiveProject = nPrj;
         this.currentActiveProject.active();
       }

@@ -34,7 +34,7 @@ export class Time {
   GetTimeStamp(): string {
     this.date.setTime(Date.now());
     let dateStr = this.GetDateString();
-    let tList = this.date.toTimeString().split(" ");
+    const tList = this.date.toTimeString().split(" ");
     dateStr += this.Separater + tList[0] + this.Separater + tList[1];
     return dateStr;
   }
@@ -66,9 +66,9 @@ export class Time {
   }
 
   Parse(timeStamp: string): TimeInfo {
-    let fieldList = timeStamp.split("|");
-    let yearField = fieldList[0].split("/");
-    let timeField = fieldList[1].split(":");
+    const fieldList = timeStamp.split("|");
+    const yearField = fieldList[0].split("/");
+    const timeField = fieldList[1].split(":");
 
     return {
       year: Number.parseInt(yearField[0]),

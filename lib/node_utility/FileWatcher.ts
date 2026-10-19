@@ -55,7 +55,7 @@ export class FileWatcher {
             case "rename":
               if (this.OnRename) {
                 if (this.isDir) {
-                  if (filename != null) {
+                  if (filename !== null && filename !== undefined) {
                     this.OnRename(
                       File.fromArray([this.file.path, filename.toString()]),
                     );
@@ -69,7 +69,7 @@ export class FileWatcher {
             case "change":
               if (this.OnChanged) {
                 if (this.isDir) {
-                  if (filename != null) {
+                  if (filename !== null && filename !== undefined) {
                     this.OnChanged(
                       File.fromArray([this.file.path, filename.toString()]),
                     );

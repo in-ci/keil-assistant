@@ -73,7 +73,7 @@ export class File {
   ): boolean {
     let isMatch: boolean = false;
 
-    for (let reg of regList) {
+    for (const reg of regList) {
       if (reg.test(str)) {
         isMatch = true;
         break;
@@ -191,7 +191,7 @@ export class File {
   CreateDir(recursive: boolean = false): void {
     if (!this.IsDir()) {
       if (recursive) {
-        let list = this.path.split(Path.sep);
+        const list = this.path.split(Path.sep);
         let f: File;
         if (list.length > 0) {
           let dir: string = list[0];
@@ -211,13 +211,13 @@ export class File {
   }
 
   GetList(fileFilter?: RegExp[], dirFilter?: RegExp[]): File[] {
-    let list: File[] = [];
+    const list: File[] = [];
     fs.readdirSync(this.path).forEach((str: string) => {
       if (str !== "." && str !== "..") {
         const f = new File(this.path + Path.sep + str);
         if (f.IsDir()) {
           if (dirFilter) {
-            for (let reg of dirFilter) {
+            for (const reg of dirFilter) {
               if (reg.test(f.name)) {
                 list.push(f);
                 break;
@@ -228,7 +228,7 @@ export class File {
           }
         } else {
           if (fileFilter) {
-            for (let reg of fileFilter) {
+            for (const reg of fileFilter) {
               if (reg.test(f.name)) {
                 list.push(f);
                 break;
@@ -244,7 +244,7 @@ export class File {
   }
 
   GetAll(fileFilter?: RegExp[], dirFilter?: RegExp[]): File[] {
-    let res: File[] = [];
+    const res: File[] = [];
 
     let fStack: File[] = this.GetList(fileFilter);
     let f: File;
@@ -269,7 +269,7 @@ export class File {
   }
 
   CopyList(dir: File, fileFilter?: RegExp[], dirFilter?: RegExp[]) {
-    let fList = dir.GetList(fileFilter, dirFilter);
+    const fList = dir.GetList(fileFilter, dirFilter);
     fList.forEach((f) => {
       if (f.IsFile()) {
         this.CopyRetainDir(dir, f);
@@ -278,7 +278,7 @@ export class File {
   }
 
   CopyAll(dir: File, fileFilter?: RegExp[], dirFilter?: RegExp[]) {
-    let fList = dir.GetAll(fileFilter, dirFilter);
+    const fList = dir.GetAll(fileFilter, dirFilter);
     fList.forEach((f) => {
       if (f.IsFile()) {
         this.CopyRetainDir(dir, f);
