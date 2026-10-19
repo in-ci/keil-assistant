@@ -17,7 +17,6 @@ import { File } from "../lib/node_utility/File";
 import { ResourceManager } from "./ResourceManager";
 import { FileWatcher } from "../lib/node_utility/FileWatcher";
 import { Time } from "../lib/node_utility/Time";
-import { isArray } from "util";
 import { CmdLineHandler } from "./CmdLineHandler";
 
 export function activate(context: vscode.ExtensionContext) {
@@ -106,7 +105,10 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  prjExplorer.loadWorkspace();
+  void prjExplorer.loadWorkspace().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    vscode.window.showErrorMessage(`Failed to load Keil workspace: ${message}`);
+  });
 }
 
 export function deactivate() {
@@ -132,16 +134,121 @@ function openWorkspace(wsFile: File) {
 
 interface IView {
   label: string;
-
   prjID: string;
-
   icons?: { light: string; dark: string };
-
   tooltip?: string;
-
   contextVal?: string;
-
   getChildViews(): IView[] | undefined;
+}
+
+/**
+ * xml2js 解析得到的 XML 节点。
+ * XML 子节点可能是对象、数组、字符串或其他基本类型。
+ */
+type XmlNode = Record<string, unknown>;
+
+function isRecord(value: unknown): value is XmlNode {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 读取 XML 指定路径上的值。
+ *
+ * 示例：
+ * getXmlValue(target, 'TargetOption', 'Target51', 'C51')
+ */
+function getXmlValue(value: unknown, ...keys: string[]): unknown {
+  let current: unknown = value;
+
+  for (const key of keys) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+
+    current = current[key];
+  }
+
+  return current;
+}
+
+/**
+ * 获取 XML 对象节点。
+ */
+function getXmlNode(value: unknown, ...keys: string[]): XmlNode | undefined {
+  const result = getXmlValue(value, ...keys);
+  return isRecord(result) ? result : undefined;
+}
+
+/**
+ * 兼容 xml2js 的显式单个对象和多个对象数组。
+ */
+function getXmlNodes(value: unknown): XmlNode[] {
+  const values: unknown[] = Array.isArray(value)
+    ? value
+    : value === undefined || value === null
+      ? []
+      : [value];
+
+  return values.filter(isRecord);
+}
+
+/**
+ * 读取 XML 文本。
+ */
+function getXmlText(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return undefined;
+}
+
+interface CppConfiguration {
+  name: string;
+  includePath?: string[] | undefined;
+  defines?: string[] | undefined;
+  intelliSenseMode?: string;
+  [key: string]: unknown;
+}
+
+interface CppProperties {
+  configurations: CppConfiguration[];
+  version: number;
+  [key: string]: unknown;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item: unknown) => typeof item === "string")
+  );
+}
+
+function isCppConfiguration(value: unknown): value is CppConfiguration {
+  if (!isRecord(value) || typeof value["name"] !== "string") {
+    return false;
+  }
+
+  const includePath = value["includePath"];
+  const defines = value["defines"];
+
+  return (
+    (includePath === undefined || isStringArray(includePath)) &&
+    (defines === undefined || isStringArray(defines))
+  );
+}
+
+function isCppProperties(value: unknown): value is CppProperties {
+  return (
+    isRecord(value) &&
+    typeof value["version"] === "number" &&
+    Array.isArray(value["configurations"]) &&
+    value["configurations"].every(isCppConfiguration)
+  );
 }
 
 //===============================================
@@ -367,27 +474,31 @@ class KeilProject implements IView, KeilProjectInfo {
     }
   }
 
-  async load() {
+  async load(): Promise<void> {
     const parser = new xml2js.Parser({ explicitArray: false });
-    const doc = await parser.parseStringPromise({
-      toString: () => {
-        return this.uvprjFile.Read();
-      },
+
+    const doc: unknown = await parser.parseStringPromise({
+      toString: () => this.uvprjFile.Read(),
     });
-    const targets = doc["Project"]["Targets"]["Target"];
 
-    // init uVsion info
-    this.uVsionFileInfo.schemaVersion = doc["Project"]["SchemaVersion"];
+    const project = getXmlNode(doc, "Project");
 
-    if (isArray(targets)) {
-      for (const target of targets) {
-        this.targetList.push(
-          Target.getInstance(this, this.uVsionFileInfo, target),
-        );
-      }
-    } else {
+    if (!project) {
+      throw new Error("Invalid uVision project XML: missing Project node");
+    }
+
+    const targetNodes = getXmlNodes(getXmlValue(project, "Targets", "Target"));
+
+    // 初始化 uVision 信息
+    this.uVsionFileInfo.schemaVersion = getXmlText(project["SchemaVersion"]);
+
+    if (targetNodes.length === 0) {
+      throw new Error("Invalid uVision project XML: no Target nodes found");
+    }
+
+    for (const target of targetNodes) {
       this.targetList.push(
-        Target.getInstance(this, this.uVsionFileInfo, targets),
+        Target.getInstance(this, this.uVsionFileInfo, target),
       );
     }
 
@@ -407,40 +518,39 @@ class KeilProject implements IView, KeilProjectInfo {
    * file each time), and unconditionally, so the C/C++ extension reloaded its
    * configuration even when nothing had changed.
    */
-  private updateCppProperties() {
+  private updateCppProperties(): void {
     const proFile = new File(
       this.vscodeDir.path + File.sep + "c_cpp_properties.json",
     );
 
     let origin: string | undefined;
-    let obj: any;
+    let obj: CppProperties = {
+      configurations: [],
+      version: 4,
+    };
 
     if (proFile.IsFile()) {
       try {
         origin = proFile.Read();
-        obj = JSON.parse(origin);
+
+        const parsed: unknown = JSON.parse(origin);
+
+        if (!isCppProperties(parsed)) {
+          throw new Error("Invalid c_cpp_properties.json structure");
+        }
+
+        obj = parsed;
       } catch (error) {
         this.logger.log(error);
       }
     }
 
-    if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-      obj = { configurations: [], version: 4 };
-    }
-
-    if (!Array.isArray(obj["configurations"])) {
-      obj["configurations"] = [];
-    }
-
-    const configList: any[] = obj["configurations"];
+    const configList = obj.configurations;
 
     for (const target of this.targetList) {
       const config = target.getCppPropertiesConfig();
-      const index = configList.findIndex((conf) => {
-        return (
-          conf !== null && typeof conf === "object" && conf.name === config.name
-        );
-      });
+
+      const index = configList.findIndex((conf) => conf.name === config.name);
 
       if (index === -1) {
         configList.push(config);
@@ -548,7 +658,7 @@ abstract class Target implements IView {
   protected _event: event.EventEmitter;
   protected project: KeilProjectInfo;
   protected cppConfigName: string;
-  protected targetDOM: any;
+  protected targetDOM: XmlNode;
   protected uvInfo: uVisonInfo;
   protected fGroups: FileGroup[];
   protected includes: Set<string>;
@@ -564,16 +674,27 @@ abstract class Target implements IView {
   private sourceRefsDirty = false;
   private sourceRefsTimer?: NodeJS.Timeout;
 
-  constructor(prjInfo: KeilProjectInfo, uvInfo: uVisonInfo, targetDOM: any) {
+  constructor(
+    prjInfo: KeilProjectInfo,
+    uvInfo: uVisonInfo,
+    targetDOM: XmlNode,
+  ) {
     this._event = new event.EventEmitter();
     this.project = prjInfo;
     this.targetDOM = targetDOM;
     this.uvInfo = uvInfo;
     this.prjID = prjInfo.prjID;
-    this.targetName = targetDOM["TargetName"];
+
+    const targetName = getXmlText(targetDOM["TargetName"]);
+    if (!targetName) {
+      throw new Error("Invalid uVision project XML: missing TargetName");
+    }
+    this.targetName = targetName;
+
     this.label = this.targetName;
     this.tooltip = this.targetName;
     this.cppConfigName = this.targetName;
+
     this.includes = new Set();
     this.defines = new Set();
     this.fGroups = [];
@@ -612,7 +733,7 @@ abstract class Target implements IView {
   static getInstance(
     prjInfo: KeilProjectInfo,
     uvInfo: uVisonInfo,
-    targetDOM: any,
+    targetDOM: XmlNode,
   ): Target {
     if (prjInfo.uvprjFile.suffix.toLowerCase() === ".uvproj") {
       return new C51Target(prjInfo, uvInfo, targetDOM);
@@ -628,7 +749,7 @@ abstract class Target implements IView {
    * of once per target, which used to mean read+parse+write of the same file
    * for every target of the project.
    */
-  getCppPropertiesConfig(): any {
+  getCppPropertiesConfig(): CppConfiguration {
     return {
       name: this.cppConfigName,
       includePath: Array.from(this.includes).concat(["${default}"]),
@@ -646,7 +767,7 @@ abstract class Target implements IView {
 
     const incListStr: string = this.getIncString(this.targetDOM);
     const defineListStr: string = this.getDefineString(this.targetDOM);
-    const _groups: any = this.getGroups(this.targetDOM);
+    const groups = this.getGroups(this.targetDOM);
     const sysIncludes = this.getSystemIncludes(this.targetDOM);
 
     // set includes
@@ -682,70 +803,65 @@ abstract class Target implements IView {
     // set file groups
     this.fGroups = [];
 
-    let groups: any[];
-    if (Array.isArray(_groups)) {
-      groups = _groups;
-    } else {
-      groups = [_groups];
-    }
-
     for (const group of groups) {
-      if (group["Files"] !== undefined) {
-        let isGroupExcluded = false;
-        let fileList: any[];
+      const filesValue = group["Files"];
 
-        if (group["GroupOption"]) {
-          // check group is excluded
-          const gOption = group["GroupOption"]["CommonProperty"];
-          if (gOption && gOption["IncludeInBuild"] === "0") {
-            isGroupExcluded = true;
-          }
-        }
-
-        const nGrp = new FileGroup(
-          this.prjID,
-          group["GroupName"],
-          isGroupExcluded,
-        );
-
-        if (Array.isArray(group["Files"])) {
-          fileList = [];
-          for (const files of group["Files"]) {
-            if (Array.isArray(files["File"])) {
-              fileList = fileList.concat(files["File"]);
-            } else if (files["File"] !== undefined) {
-              fileList.push(files["File"]);
-            }
-          }
-        } else {
-          if (Array.isArray(group["Files"]["File"])) {
-            fileList = group["Files"]["File"];
-          } else if (group["Files"]["File"] !== undefined) {
-            fileList = [group["Files"]["File"]];
-          } else {
-            fileList = [];
-          }
-        }
-
-        for (const file of fileList) {
-          const f = new File(this.project.toAbsolutePath(file["FilePath"]));
-
-          let isFileExcluded = isGroupExcluded;
-          if (isFileExcluded === false && file["FileOption"]) {
-            // check file is enable
-            const fOption = file["FileOption"]["CommonProperty"];
-            if (fOption && fOption["IncludeInBuild"] === "0") {
-              isFileExcluded = true;
-            }
-          }
-
-          const nFile = new Source(this.prjID, f, !isFileExcluded);
-          this.includes.add(f.dir);
-          nGrp.sources.push(nFile);
-        }
-
-        this.fGroups.push(nGrp);
+      if (filesValue === undefined) {
+        continue;
       }
+
+      let isGroupExcluded = false;
+
+      const groupCommon = getXmlNode(group, "GroupOption", "CommonProperty");
+
+      if (getXmlText(groupCommon?.["IncludeInBuild"]) === "0") {
+        isGroupExcluded = true;
+      }
+
+      const groupName = getXmlText(group["GroupName"]) ?? "";
+
+      const nGrp = new FileGroup(this.prjID, groupName, isGroupExcluded);
+
+      const fileList: XmlNode[] = [];
+
+      // 兼容 Files 为数组或单个对象的 XML 结构。
+      if (Array.isArray(filesValue)) {
+        for (const fileContainer of filesValue) {
+          if (isRecord(fileContainer)) {
+            fileList.push(...getXmlNodes(fileContainer["File"]));
+          }
+        }
+      } else if (isRecord(filesValue)) {
+        fileList.push(...getXmlNodes(filesValue["File"]));
+      }
+
+      for (const file of fileList) {
+        const filePath = getXmlText(file["FilePath"]);
+
+        if (!filePath) {
+          continue;
+        }
+
+        const f = new File(this.project.toAbsolutePath(filePath));
+
+        let isFileExcluded = isGroupExcluded;
+
+        const fileCommon = getXmlNode(file, "FileOption", "CommonProperty");
+
+        if (
+          !isFileExcluded &&
+          getXmlText(fileCommon?.["IncludeInBuild"]) === "0"
+        ) {
+          isFileExcluded = true;
+        }
+
+        const nFile = new Source(this.prjID, f, !isFileExcluded);
+
+        this.includes.add(f.dir);
+        nGrp.sources.push(nFile);
+      }
+
+      this.fGroups.push(nGrp);
     }
 
     await this.updateSourceRefs();
@@ -944,16 +1060,16 @@ abstract class Target implements IView {
     return this.fGroups;
   }
 
-  protected abstract checkProject(target: any): Error | undefined;
+  protected abstract checkProject(target: XmlNode): Error | undefined;
 
-  protected abstract getIncString(target: any): string;
-  protected abstract getDefineString(target: any): string;
-  protected abstract getSysDefines(target: any): string[];
-  protected abstract getGroups(target: any): any[];
-  protected abstract getSystemIncludes(target: any): string[] | undefined;
+  protected abstract getIncString(target: XmlNode): string;
+  protected abstract getDefineString(target: XmlNode): string;
+  protected abstract getSysDefines(target: XmlNode): string[];
+  protected abstract getGroups(target: XmlNode): XmlNode[];
+  protected abstract getSystemIncludes(target: XmlNode): string[] | undefined;
 
-  protected abstract getOutputFolder(target: any): string | undefined;
-  protected abstract parseRefLines(target: any, lines: string[]): string[];
+  protected abstract getOutputFolder(target: XmlNode): string | undefined;
+  protected abstract parseRefLines(target: XmlNode, lines: string[]): string[];
 
   protected abstract getProblemMatcher(): string[];
   protected abstract getBuildCommand(): string[];
@@ -964,26 +1080,25 @@ abstract class Target implements IView {
 //===============================================
 
 class C51Target extends Target {
-  protected checkProject(target: any): Error | undefined {
-    if (
-      target["TargetOption"]["Target51"] === undefined ||
-      target["TargetOption"]["Target51"]["C51"] === undefined
-    ) {
+  protected checkProject(target: XmlNode): Error | undefined {
+    const c51 = getXmlNode(target, "TargetOption", "Target51", "C51");
+    if (!c51) {
       return new Error(
-        `This uVision project is not a C51 project, but have a 'uvproj' suffix !`,
+        "This uVision project is not a C51 project, but has a 'uvproj' suffix.",
       );
     }
-  }
-
-  protected parseRefLines(_target: any, _lines: string[]): string[] {
-    return [];
-  }
-
-  protected getOutputFolder(_target: any): string | undefined {
     return undefined;
   }
 
-  protected getSysDefines(_target: any): string[] {
+  protected parseRefLines(_target: XmlNode, _lines: string[]): string[] {
+    return [];
+  }
+
+  protected getOutputFolder(_target: XmlNode): string | undefined {
+    return undefined;
+  }
+
+  protected getSysDefines(_target: XmlNode): string[] {
     return [
       "__C51__",
       "__VSCODE_C51__",
@@ -1010,7 +1125,7 @@ class C51Target extends Target {
     ];
   }
 
-  protected getSystemIncludes(_target: any): string[] | undefined {
+  protected getSystemIncludes(_target: XmlNode): string[] | undefined {
     const exeFile = new File(ResourceManager.getInstance().getC51UV4Path());
     if (exeFile.IsFile()) {
       return [
@@ -1020,18 +1135,38 @@ class C51Target extends Target {
     return undefined;
   }
 
-  protected getIncString(target: any): string {
-    const target51 = target["TargetOption"]["Target51"]["C51"];
-    return target51["VariousControls"]["IncludePath"];
+  protected getIncString(target: XmlNode): string {
+    return (
+      getXmlText(
+        getXmlValue(
+          target,
+          "TargetOption",
+          "Target51",
+          "C51",
+          "VariousControls",
+          "IncludePath",
+        ),
+      ) ?? ""
+    );
   }
 
-  protected getDefineString(target: any): string {
-    const target51 = target["TargetOption"]["Target51"]["C51"];
-    return target51["VariousControls"]["Define"];
+  protected getDefineString(target: XmlNode): string {
+    return (
+      getXmlText(
+        getXmlValue(
+          target,
+          "TargetOption",
+          "Target51",
+          "C51",
+          "VariousControls",
+          "Define",
+        ),
+      ) ?? ""
+    );
   }
 
-  protected getGroups(target: any): any[] {
-    return target["Groups"]["Group"] || [];
+  protected getGroups(target: XmlNode): XmlNode[] {
+    return getXmlNodes(getXmlValue(target, "Groups", "Group"));
   }
 
   protected getProblemMatcher(): string[] {
@@ -1234,18 +1369,19 @@ class ArmTarget extends Target {
 
   private static armclangBuildinMacros: string[] | undefined;
 
-  protected checkProject(): Error | undefined {
+  protected checkProject(_target: XmlNode): Error | undefined {
     return undefined;
   }
 
-  protected getOutputFolder(target: any): string | undefined {
-    try {
-      return <string>(
-        target["TargetOption"]["TargetCommonOption"]["OutputDirectory"]
-      );
-    } catch {
-      return undefined;
-    }
+  protected getOutputFolder(target: XmlNode): string | undefined {
+    return getXmlText(
+      getXmlValue(
+        target,
+        "TargetOption",
+        "TargetCommonOption",
+        "OutputDirectory",
+      ),
+    );
   }
 
   private gnu_parseRefLines(lines: string[]): string[] {
@@ -1294,8 +1430,10 @@ class ArmTarget extends Target {
     return Array.from(resultList);
   }
 
-  protected parseRefLines(target: any, lines: string[]): string[] {
-    if (target["uAC6"] === "1") {
+  protected parseRefLines(target: XmlNode, lines: string[]): string[] {
+    const isArmClang = getXmlText(target["uAC6"]) === "1";
+
+    if (isArmClang) {
       // ARMClang
       return this.gnu_parseRefLines(lines);
     } else {
@@ -1330,8 +1468,9 @@ class ArmTarget extends Target {
     }
   }
 
-  protected getSysDefines(target: any): string[] {
-    if (target["uAC6"] === "1") {
+  protected getSysDefines(target: XmlNode): string[] {
+    const isArmClang = getXmlText(target["uAC6"]) === "1";
+    if (isArmClang) {
       // ARMClang
       ArmTarget.initArmclangMacros();
 
@@ -1379,13 +1518,16 @@ class ArmTarget extends Target {
     }
   }
 
-  protected getSystemIncludes(target: any): string[] | undefined {
+  protected getSystemIncludes(target: XmlNode): string[] | undefined {
     const exeFile = new File(ResourceManager.getInstance().getArmUV4Path());
     if (exeFile.IsFile()) {
-      const toolName = target["uAC6"] === "1" ? "ARMCLANG" : "ARMCC";
+      const isArmClang = getXmlText(target["uAC6"]) === "1";
+      const toolName = isArmClang ? "ARMCLANG" : "ARMCC";
+
       const incDir = new File(
         `${node_path.dirname(exeFile.dir)}${File.sep}ARM${File.sep}${toolName}${File.sep}include`,
       );
+
       if (incDir.IsDir()) {
         return [incDir.path].concat(
           incDir.GetList(File.EMPTY_FILTER).map((dir) => {
@@ -1398,18 +1540,38 @@ class ArmTarget extends Target {
     return undefined;
   }
 
-  protected getIncString(target: any): string {
-    const dat = target["TargetOption"]["TargetArmAds"]["Cads"];
-    return dat["VariousControls"]["IncludePath"];
+  protected getIncString(target: XmlNode): string {
+    return (
+      getXmlText(
+        getXmlValue(
+          target,
+          "TargetOption",
+          "TargetArmAds",
+          "Cads",
+          "VariousControls",
+          "IncludePath",
+        ),
+      ) ?? ""
+    );
   }
 
-  protected getDefineString(target: any): string {
-    const dat = target["TargetOption"]["TargetArmAds"]["Cads"];
-    return dat["VariousControls"]["Define"];
+  protected getDefineString(target: XmlNode): string {
+    return (
+      getXmlText(
+        getXmlValue(
+          target,
+          "TargetOption",
+          "TargetArmAds",
+          "Cads",
+          "VariousControls",
+          "Define",
+        ),
+      ) ?? ""
+    );
   }
 
-  protected getGroups(target: any): any[] {
-    return target["Groups"]["Group"] || [];
+  protected getGroups(target: XmlNode): XmlNode[] {
+    return getXmlNodes(getXmlValue(target, "Groups", "Group"));
   }
 
   protected getProblemMatcher(): string[] {
@@ -1492,9 +1654,10 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
     ) {
       const wsFilePath: string =
         vscode.workspace.workspaceFile &&
-        /^file:/.test(vscode.workspace.workspaceFile.toString())
+        vscode.workspace.workspaceFile.scheme === "file"
           ? node_path.dirname(vscode.workspace.workspaceFile.fsPath)
           : vscode.workspace.workspaceFolders[0].uri.fsPath;
+
       const workspace = new File(wsFilePath);
       if (workspace.IsDir()) {
         const excludeList =
@@ -1611,7 +1774,7 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
 
   //----------------------------------
 
-  itemClickInfo: any = undefined;
+  private itemClickInfo: { name: string; time: number } | undefined;
 
   private async onItemClick(item: IView) {
     switch (item.contextVal) {
@@ -1689,7 +1852,7 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
     return res;
   }
 
-  getChildren(element?: IView | undefined): vscode.ProviderResult<IView[]> {
+  getChildren(element?: IView): vscode.ProviderResult<IView[]> {
     if (element === undefined) {
       return Array.from(this.prjList.values());
     } else {
