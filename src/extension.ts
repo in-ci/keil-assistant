@@ -279,12 +279,24 @@ class KeilProject implements IView, KeilProjectInfo {
             this.targetList = [];
             await this.load();
             this.notifyUpdateView();
-        } catch (err) {
-            if (err.code && err.code === 'EBUSY') {
-                this.logger.log(`[Warn] uVision project file '${this.uvprjFile.name}' is locked !, delay 500 ms and retry !`);
+        } catch (err: unknown) {
+
+            const errorMessage =
+                err instanceof Error ? err.message : String(err);
+
+            const errorCode =
+                typeof err === 'object' && err !== null && 'code' in err
+                    ? (err as NodeJS.ErrnoException).code
+                    : undefined;
+
+            if (errorCode === 'EBUSY') {
+                this.logger.log(
+                    `[Warn] uVision project file '${this.uvprjFile.name}' is locked !, delay 500 ms and retry !`
+                );
+
                 setTimeout(() => this.onReload(), 500);
             } else {
-                vscode.window.showErrorMessage(`reload project failed !, msg: ${err.message}`);
+                vscode.window.showErrorMessage(`reload project failed !, msg: ${errorMessage}`);
             }
         }
     }
@@ -1163,15 +1175,15 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
 
     private ItemClickCommand: string = 'Item.Click';
 
-    onDidChangeTreeData: vscode.Event<IView>;
-    private viewEvent: vscode.EventEmitter<IView>;
+    onDidChangeTreeData: vscode.Event<IView | IView[] | undefined | null | void>;
+    private viewEvent: vscode.EventEmitter<IView | IView[] | undefined | null | void>;
 
     private prjList: Map<string, KeilProject>;
     private currentActiveProject: KeilProject | undefined;
 
     constructor(context: vscode.ExtensionContext) {
         this.prjList = new Map();
-        this.viewEvent = new vscode.EventEmitter();
+        this.viewEvent = new vscode.EventEmitter<IView | IView[] | undefined | null | void>();
         this.onDidChangeTreeData = this.viewEvent.event;
         context.subscriptions.push(vscode.window.registerTreeDataProvider('project', this));
         context.subscriptions.push(vscode.commands.registerCommand(this.ItemClickCommand, (item) => this.onItemClick(item)));
@@ -1339,11 +1351,18 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
         }
 
         if (element.icons) {
-            res.iconPath = {
-                light: ResourceManager.getInstance().getIconByName(element.icons.light),
-                dark: ResourceManager.getInstance().getIconByName(element.icons.dark)
-            };
+            const resources = ResourceManager.getInstance();
+            const lightPath = resources.getIconByName(element.icons.light);
+            const darkPath = resources.getIconByName(element.icons.dark);
+
+            if (lightPath && darkPath) {
+                res.iconPath = {
+                    light: vscode.Uri.file(lightPath),
+                    dark: vscode.Uri.file(darkPath)
+                };
+            }
         }
+
         return res;
     }
 

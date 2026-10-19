@@ -227,7 +227,7 @@
             "explorer": [
                 {
                     "id": "project",
-                    "icon":"",
+                    "icon": "",
                     "name": "Keil uVision 2026 Project"
                 }
             ]
@@ -289,22 +289,22 @@
         "test": "node ./out/test/runTest.js"
     },
     "devDependencies": {
-        "@types/glob": "^7.1.1",
-        "@types/mocha": "^5.2.7",
-        "@types/node": "^12.11.7",
-        "@types/vscode": "1.38.0",
-        "@types/xml2js": "^0.4.5",
-        "glob": "^7.1.5",
-        "mocha": "^6.2.2",
-        "ts-loader": "^7.0.5",
+        "@types/mocha": "^10.0.10",
+        "@types/node": "^24.19.2",
+        "@types/vscode": "1.140.0",
+        "@types/xml2js": "^0.4.14",
+        "@vscode/test-electron": "^3.1.0",
+        "glob": "^13.0.6",
+        "mocha": "^12.0.3",
+        "ts-loader": "^9.6.2",
         "tslint": "^5.20.0",
-        "typescript": "^3.6.4",
+        "typescript": "6.0.3",
         "vscode-test": "^1.2.2",
         "webpack": "^5.112.0",
-        "webpack-cli": "^5.1.4"
+        "webpack-cli": "^7.2.3"
     },
     "dependencies": {
         "vscode-variables": "1.0.1",
-        "xml2js": "^0.4.23"
+        "xml2js": "^0.6.2"
     }
 }

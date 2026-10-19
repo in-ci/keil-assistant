@@ -31,7 +31,7 @@ export class FileWatcher {
 
         if (this.isDir && this.selfWatcher === undefined) {
             this.selfWatcher = fs.watch(this.file.dir, { recursive: false }, (event, fname) => {
-                if (event === 'rename' && fname === this.file.name && this.OnRename) {
+                if (event === 'rename' && fname?.toString() === this.file.name && this.OnRename) {
                     this.OnRename(this.file);
                 }
             });
@@ -45,12 +45,34 @@ export class FileWatcher {
                 switch (event) {
                     case 'rename':
                         if (this.OnRename) {
-                            this.OnRename(this.isDir ? File.fromArray([this.file.path, filename]) : this.file);
+                            if (this.isDir) {
+                                if (filename != null) {
+                                    this.OnRename(
+                                        File.fromArray([   this.file.path,
+                                            filename.toString()
+                                        ])
+                                    );
+                                }
+                            } else {
+                                this.OnRename(this.file);
+                            }
                         }
                         break;
+
                     case 'change':
                         if (this.OnChanged) {
-                            this.OnChanged(this.isDir ? File.fromArray([this.file.path, filename]) : this.file);
+                            if (this.isDir) {
+                                if (filename != null) {
+                                    this.OnChanged(
+                                        File.fromArray([
+                                            this.file.path,
+                                            filename.toString()
+                                        ])
+                                    );
+                                }
+                            } else {
+                                this.OnChanged(this.file);
+                            }
                         }
                         break;
                 }

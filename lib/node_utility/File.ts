@@ -272,8 +272,8 @@ export class File {
 
     //-------------------------------------------------
 
-    Read(encoding?: string): string {
-        return fs.readFileSync(this.path, encoding || 'utf8');
+    Read(encoding: BufferEncoding = 'utf8'): string {
+        return fs.readFileSync(this.path, encoding);
     }
 
     Write(str: string, options?: fs.WriteFileOptions) {
