@@ -5,7 +5,9 @@ import * as event from 'events';
 import * as fs from 'fs';
 import * as node_path from 'path';
 import * as child_process from 'child_process';
-import * as vscodeVariables from 'vscode-variables';
+// import * as vscodeVariables from 'vscode-variables';
+const vscodeVariables: (value: string, recursive?: boolean) => string =
+    require('vscode-variables');
 
 import { File } from '../lib/node_utility/File';
 import { ResourceManager } from './ResourceManager';
@@ -65,7 +67,7 @@ export function activate(context: vscode.ExtensionContext) {
     subscriber.push(vscode.commands.registerCommand('item.copyValue', (item: IView) => vscode.env.clipboard.writeText(item.tooltip || '')));
 
     subscriber.push(vscode.commands.registerCommand('project.switch', (item: IView) => prjExplorer.switchTargetByProject(item)));
-    
+
     subscriber.push(vscode.commands.registerCommand('project.active', (item: IView) => prjExplorer.activeProject(item)));
 
     prjExplorer.loadWorkspace();
@@ -1182,11 +1184,19 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
             const workspace = new File(wsFilePath);
             if (workspace.IsDir()) {
                 const excludeList = ResourceManager.getInstance().getProjectExcludeList();
-                const uvList = workspace.GetList([/\.uvproj[x]?$/i], File.EMPTY_FILTER).concat(ResourceManager.getInstance().getProjectFileLocationList())
-                    .filter((file) => { return !excludeList.includes(file.name); });
+
+                // const uvList = workspace.GetList([/\.uvproj[x]?$/i], File.EMPTY_FILTER).concat(ResourceManager.getInstance().getProjectFileLocationList())
+                //     .filter((file) => { return !excludeList.includes(file.name); });
+
+                const uvList: File[] = workspace.GetList([/\.uvproj[x]?$/i], File.EMPTY_FILTER)
+                    .map((file) => file.path)
+                    .concat(ResourceManager.getInstance().getProjectFileLocationList())
+                    .map((path) => new File(vscodeVariables(path)))
+                    .filter((file) => !excludeList.includes(file.name));
+
                 for (const uvFile of uvList) {
                     try {
-                        await this.openProject(vscodeVariables(uvFile));
+                        await this.openProject(uvFile.path);
                     } catch (error) {
                         vscode.window.showErrorMessage(`open project: '${uvFile.name}' failed !, msg: ${(<Error>error).message}`);
                     }
