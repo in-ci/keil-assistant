@@ -35,7 +35,7 @@ export class ResourceManager {
   }
 
   private init() {
-    // init dirs
+    // 初始化目录
     for (const path of dirList) {
       const f = new File(this.extensionDir.path + path);
       if (f.IsDir()) {
@@ -43,7 +43,7 @@ export class ResourceManager {
       }
     }
 
-    // init icons
+    // 初始化图标
     const iconDir = this.dirMap.get("icons");
     if (iconDir) {
       for (const icon of iconDir.GetList([/\.svg$/i], File.EMPTY_FILTER)) {
@@ -56,8 +56,14 @@ export class ResourceManager {
     return vscode.workspace.getConfiguration("KeilAssistant");
   }
 
-  getBuilderExe(): string {
-    return this.dirMap.get("bin")?.path + File.sep + "Uv4Caller.exe";
+  /**
+   * Uv4Caller.exe 的路径；扩展安装不完整（缺少 bin 目录）时返回 undefined。
+   */
+  getBuilderExe(): string | undefined {
+    const binDir = this.dirMap.get("bin");
+    return binDir === undefined
+      ? undefined
+      : binDir.path + File.sep + "Uv4Caller.exe";
   }
 
   getC51UV4Path(): string {
@@ -81,8 +87,8 @@ export class ResourceManager {
   }
 
   /**
-   * Cached vscode.Uri for an icon: the tree view asks for icons on every
-   * render, and creating the Uri objects again each time is pure garbage.
+   * 按图标名缓存 vscode.Uri：树视图每次渲染都会取图标，
+   * 反复创建 Uri 对象只会产生垃圾。
    */
   getIconUri(name: string): vscode.Uri | undefined {
     let uri = this.iconUriMap.get(name);

@@ -22,7 +22,7 @@ import { CmdLineHandler } from "./CmdLineHandler";
 export function activate(context: vscode.ExtensionContext) {
   console.log("---- keil-assistant actived ----");
 
-  // init resource
+  // 初始化插件资源
   ResourceManager.getInstance(context);
 
   const prjExplorer = new ProjectExplorer(context);
@@ -41,11 +41,11 @@ export function activate(context: vscode.ExtensionContext) {
 
       try {
         if (uri && uri.length > 0) {
-          // load project
+          // 打开工程
           const uvPrjPath = uri[0].fsPath;
           await prjExplorer.openProject(uvPrjPath);
 
-          // switch workspace
+          // 切换工作区到工程所在目录
           const result = await vscode.window.showInformationMessage(
             "keil project load done !, switch workspace ?",
             "Ok",
@@ -139,12 +139,30 @@ interface IView {
   tooltip?: string;
   contextVal?: string;
   getChildViews(): IView[] | undefined;
+  /** 是否可能还有子节点；用于计算折叠状态，不必真的构造子节点 */
+  hasChildViews(): boolean;
 }
 
 /**
  * xml2js 解析得到的 XML 节点。
  * XML 子节点可能是对象、数组、字符串或其他基本类型。
  */
+/** 复用的图标对象：同一图标的 { light, dark } 只创建一次 */
+const iconPairCache = new Map<string, { light: string; dark: string }>();
+
+/**
+ * 取得图标对象。
+ * 工程树里可能有上万个节点，每个节点都新建一个对象没有意义。
+ */
+function getIconPair(name: string): { light: string; dark: string } {
+  let pair = iconPairCache.get(name);
+  if (pair === undefined) {
+    pair = { light: name, dark: name };
+    iconPairCache.set(name, pair);
+  }
+  return pair;
+}
+
 type XmlNode = Record<string, unknown>;
 
 function isRecord(value: unknown): value is XmlNode {
@@ -263,33 +281,77 @@ class Source implements IView {
   readonly file: File;
   readonly enable: boolean;
 
-  children: Source[] | undefined;
+  /** 依赖文件路径；子节点在展开时才真正创建 */
+  private refPaths?: string[];
+  private _children?: Source[];
 
-  /** signature of the last parsed '.d' dependency list, used to skip needless view refreshes */
+  /** 上一次解析出的 '.d' 依赖列表签名，用于跳过没有变化的刷新 */
   refSig?: string;
+
+  /** 上一次读取的 '.d' 文件修改时间；文件未变时不必再读 */
+  refMtimeMs?: number;
+
+  /**
+   * 依赖列表按需构造：一个工程的依赖项可能有几千个，
+   * 全部提前构造会让每次编译后的刷新都分配大量对象。
+   */
+  get children(): Source[] | undefined {
+    if (this._children === undefined && this.refPaths !== undefined) {
+      this._children = this.refPaths.map((refFilePath) => {
+        // 依赖项来自 '.d'，刚刚才被编译器写出，不必再做存在性检查
+        return new Source(this.prjID, new File(refFilePath), true, false);
+      });
+      this.refPaths = undefined;
+    }
+
+    return this._children;
+  }
+
+  set children(value: Source[] | undefined) {
+    this._children = value;
+    this.refPaths = undefined;
+  }
+
+  /** 更新依赖文件路径（不立即创建子节点） */
+  setRefPaths(paths: string[]) {
+    this.refPaths = paths;
+    this._children = undefined;
+  }
 
   private _icons?: { light: string; dark: string };
 
-  // The icon depends on whether the file exists on disk. Resolving it lazily
-  // keeps the (potentially thousands of) dependency nodes created after a build
-  // from doing a filesystem stat each, and only visible nodes are ever rendered.
+  /** 是否需要检查文件是否真实存在（依赖项不必检查） */
+  private readonly checkExists: boolean;
+
+  // 图标依赖文件是否存在，这里惰性求值：
+  // 编译后产生的依赖节点可能有几千个，只有真正渲染出来的才需要算。
   get icons(): { light: string; dark: string } {
     if (this._icons === undefined) {
-      const iconName = !this.file.IsFile()
-        ? "FileWarning_16x"
-        : !this.enable
-          ? "FileExclude_16x"
-          : this.getIconBySuffix(this.file.suffix.toLowerCase());
+      let iconName: string;
 
-      this._icons = { dark: iconName, light: iconName };
+      if (!this.enable) {
+        iconName = "FileExclude_16x";
+      } else if (this.checkExists && !this.file.IsFile()) {
+        iconName = "FileWarning_16x";
+      } else {
+        iconName = this.getIconBySuffix(this.file.suffix.toLowerCase());
+      }
+
+      this._icons = getIconPair(iconName);
     }
 
     return this._icons;
   }
 
-  constructor(pID: string, f: File, _enable: boolean = true) {
+  constructor(
+    pID: string,
+    f: File,
+    _enable: boolean = true,
+    _checkExists: boolean = true,
+  ) {
     this.prjID = pID;
     this.enable = _enable;
+    this.checkExists = _checkExists;
     this.file = f;
     this.label = this.file.name;
     this.tooltip = f.path;
@@ -324,6 +386,10 @@ class Source implements IView {
   getChildViews(): IView[] | undefined {
     return this.children;
   }
+
+  hasChildViews(): boolean {
+    return this._children !== undefined || this.refPaths !== undefined;
+  }
 }
 
 class FileGroup implements IView {
@@ -342,11 +408,15 @@ class FileGroup implements IView {
     this.sources = [];
     this.tooltip = gName;
     const iconName = disabled ? "FolderExclude_32x" : "Folder_32x";
-    this.icons = { light: iconName, dark: iconName };
+    this.icons = getIconPair(iconName);
   }
 
   getChildViews(): IView[] | undefined {
     return this.sources;
+  }
+
+  hasChildViews(): boolean {
+    return true;
   }
 }
 
@@ -371,10 +441,9 @@ class KeilProject implements IView, KeilProjectInfo {
   label: string;
   tooltip?: string | undefined;
   contextVal?: string | undefined = "Project";
-  icons?: { light: string; dark: string } = {
-    light: "DeactiveApplication_16x",
-    dark: "DeactiveApplication_16x",
-  };
+  icons?: { light: string; dark: string } = getIconPair(
+    "DeactiveApplication_16x",
+  );
 
   //-------------
 
@@ -382,15 +451,26 @@ class KeilProject implements IView, KeilProjectInfo {
   uvprjFile: File;
   logger: Console;
 
-  // uVison info
+  // uVision 工程信息
   uVsionFileInfo: uVisonInfo;
 
   private activeTargetName: string | undefined;
   private prevUpdateTime: number | undefined;
 
-  /** guards against overlapping reloads triggered by rapid project-file saves */
+  /** 防止工程文件被连续保存时并发重载 */
   private isReloading = false;
   private reloadAgain = false;
+
+  /** '.vscode/keil-assistant.log' 的写入流，close() 时关闭，避免每次打开工程泄漏文件句柄 */
+  private logStream: fs.WriteStream;
+
+  /** 整个工程共用一个 '.vscode' 目录监视器，用于感知 'uv4.log.lock' 变化 */
+  private uv4LogWatcher?: FileWatcher;
+  private uv4LogFileWatcher?: FileWatcher;
+  private uv4LogTimer?: NodeJS.Timeout;
+
+  /** 是否已经关闭，关闭后不再响应监视事件 */
+  private isClosed = false;
 
   protected _event: event.EventEmitter;
   protected watcher: FileWatcher;
@@ -403,9 +483,8 @@ class KeilProject implements IView, KeilProjectInfo {
     this.vscodeDir = new File(_uvprjFile.dir + File.sep + ".vscode");
     this.vscodeDir.CreateDir();
     const logPath = this.vscodeDir.path + File.sep + "keil-assistant.log";
-    this.logger = new console.Console(
-      fs.createWriteStream(logPath, { flags: "a+" }),
-    );
+    this.logStream = fs.createWriteStream(logPath, { flags: "a+" });
+    this.logger = new console.Console(this.logStream);
     this.uvprjFile = _uvprjFile;
     this.watcher = new FileWatcher(this.uvprjFile);
     this.prjID = getMD5(_uvprjFile.path);
@@ -415,6 +494,10 @@ class KeilProject implements IView, KeilProjectInfo {
       "[info] Log at : " + Time.GetInstance().GetTimeStamp() + "\r\n",
     );
     this.watcher.OnChanged = () => {
+      if (this.isClosed) {
+        return;
+      }
+
       if (
         this.prevUpdateTime === undefined ||
         this.prevUpdateTime + 2000 < Date.now()
@@ -424,6 +507,34 @@ class KeilProject implements IView, KeilProjectInfo {
       }
     };
     this.watcher.Watch();
+
+    // 原先每个 Target 各自监视同一个 'uv4.log.lock'：N 个 Target 就占 N 个句柄、
+    // 编译后触发 N 次刷新。这里改为整个工程只监视一次 '.vscode' 目录。
+    const lockFile = new File(this.vscodeDir.path + File.sep + "uv4.log.lock");
+    if (!lockFile.IsFile()) {
+      lockFile.Write("");
+    }
+
+    const uv4LogWatcher = new FileWatcher(this.vscodeDir);
+    uv4LogWatcher.OnChanged = (file) => {
+      if (file.name === "uv4.log.lock") {
+        this.scheduleSourceRefsUpdate();
+      }
+    };
+    uv4LogWatcher.OnRename = (file) => {
+      if (file.name === "uv4.log.lock") {
+        this.scheduleSourceRefsUpdate();
+      }
+    };
+    uv4LogWatcher.Watch();
+    this.uv4LogWatcher = uv4LogWatcher;
+
+    // 再直接监视锁文件本身：个别文件系统上目录监视可能漏报
+    const lockWatcher = new FileWatcher(lockFile);
+    lockWatcher.OnChanged = () => this.scheduleSourceRefsUpdate();
+    lockWatcher.OnRename = () => this.scheduleSourceRefsUpdate();
+    lockWatcher.Watch();
+    this.uv4LogFileWatcher = lockWatcher;
   }
 
   on(event: "dataChanged", listener: () => void): this {
@@ -432,8 +543,12 @@ class KeilProject implements IView, KeilProjectInfo {
   }
 
   private async onReload() {
+    if (this.isClosed) {
+      return;
+    }
+
     if (this.isReloading) {
-      // a reload is already scanning the project, run one more when it is done
+      // 已经在重载中：记录下来，等本次结束后再跑一次
       this.reloadAgain = true;
       return;
     }
@@ -441,8 +556,6 @@ class KeilProject implements IView, KeilProjectInfo {
     this.isReloading = true;
 
     try {
-      this.targetList.forEach((target) => target.close());
-      this.targetList = [];
       await this.load();
       this.notifyUpdateView();
     } catch (err: unknown) {
@@ -496,27 +609,43 @@ class KeilProject implements IView, KeilProjectInfo {
       throw new Error("Invalid uVision project XML: no Target nodes found");
     }
 
+    // 重新加载时先释放上一批 Target 的监视器，否则每次重载都会泄漏句柄
+    this.targetList.forEach((target) => target.close());
+    this.targetList = [];
+
     for (const target of targetNodes) {
       this.targetList.push(
         Target.getInstance(this, this.uVsionFileInfo, target),
       );
     }
 
-    for (const target of this.targetList) {
-      await target.load();
-      target.on("dataChanged", () => this.notifyUpdateView());
+    // Target 之间没有依赖，并行加载可以缩短大工程的打开时间；
+    // 'c_cpp_properties.json' 在全部 Target 就绪后统一写一次。
+    await Promise.all(
+      this.targetList.map(async (target) => {
+        await target.load();
+        target.on("dataChanged", () => this.notifyUpdateView());
+      }),
+    );
+
+    // 目标可能被重命名或删除，清掉已经失效的活动目标，
+    // 否则编译命令会拿到 undefined 而毫无提示
+    if (
+      this.activeTargetName !== undefined &&
+      this.getTargetByName(this.activeTargetName) === undefined
+    ) {
+      this.activeTargetName = undefined;
     }
 
     this.updateCppProperties();
   }
 
   /**
-   * Writes the include/define settings of every target into
-   * '.vscode/c_cpp_properties.json' in one go.
+   * 一次性把所有 Target 的 include/define 写入
+   * '.vscode/c_cpp_properties.json'。
    *
-   * It used to be rewritten once per target (read + parse + write of the same
-   * file each time), and unconditionally, so the C/C++ extension reloaded its
-   * configuration even when nothing had changed.
+   * 以前是每个 Target 都读取、解析、重写同一个文件，而且无条件写回，
+   * 即使内容没有变化也会让 C/C++ 插件重新加载配置。
    */
   private updateCppProperties(): void {
     const proFile = new File(
@@ -541,7 +670,10 @@ class KeilProject implements IView, KeilProjectInfo {
 
         obj = parsed;
       } catch (error) {
+        // 文件内容不合法时只记录日志并放弃本次写入，
+        // 否则会把用户手写的 C/C++ 配置整体覆盖掉。
         this.logger.log(error);
+        return;
       }
     }
 
@@ -569,10 +701,54 @@ class KeilProject implements IView, KeilProjectInfo {
     this._event.emit("dataChanged");
   }
 
+  /**
+   * 防抖后刷新所有 Target 的 '.d' 依赖列表。
+   * 一次编译过程中 'uv4.log.lock' 可能被反复改写，而每次刷新都要读取大量
+   * '.d' 文件，必须合并为一次。
+   */
+  private scheduleSourceRefsUpdate() {
+    if (this.uv4LogTimer !== undefined) {
+      clearTimeout(this.uv4LogTimer);
+    }
+
+    this.uv4LogTimer = setTimeout(() => {
+      this.uv4LogTimer = undefined;
+
+      if (this.isClosed) {
+        return;
+      }
+
+      for (const target of this.targetList) {
+        void target.updateSourceRefs();
+      }
+    }, 500);
+  }
+
   close() {
+    if (this.isClosed) {
+      return;
+    }
+
+    this.isClosed = true;
+
+    if (this.uv4LogTimer !== undefined) {
+      clearTimeout(this.uv4LogTimer);
+      this.uv4LogTimer = undefined;
+    }
+
+    this.uv4LogWatcher?.Close();
+    this.uv4LogWatcher = undefined;
+    this.uv4LogFileWatcher?.Close();
+    this.uv4LogFileWatcher = undefined;
+
     this.watcher.Close();
     this.targetList.forEach((target) => target.close());
+    this.targetList = [];
+
     this.logger.log("[info] project closed: " + this.label);
+
+    // 结束日志流，否则反复打开/关闭工程会不断累积文件句柄
+    this.logStream.end();
   }
 
   toAbsolutePath(rePath: string): string {
@@ -584,17 +760,11 @@ class KeilProject implements IView, KeilProjectInfo {
   }
 
   active() {
-    this.icons = {
-      light: "ActiveApplication_16x",
-      dark: "ActiveApplication_16x",
-    };
+    this.icons = getIconPair("ActiveApplication_16x");
   }
 
   deactive() {
-    this.icons = {
-      light: "DeactiveApplication_16x",
-      dark: "DeactiveApplication_16x",
-    };
+    this.icons = getIconPair("DeactiveApplication_16x");
   }
 
   getTargetByName(name: string): Target | undefined {
@@ -639,6 +809,10 @@ class KeilProject implements IView, KeilProjectInfo {
   getTargets(): Target[] {
     return this.targetList;
   }
+
+  hasChildViews(): boolean {
+    return this.targetList.length > 0;
+  }
 }
 
 abstract class Target implements IView {
@@ -646,10 +820,7 @@ abstract class Target implements IView {
   label: string;
   tooltip?: string | undefined;
   contextVal?: string | undefined = "Target";
-  icons?: { light: string; dark: string } = {
-    light: "Class_16x",
-    dark: "Class_16x",
-  };
+  icons?: { light: string; dark: string } = getIconPair("Class_16x");
 
   //-------------
 
@@ -665,14 +836,15 @@ abstract class Target implements IView {
   protected defines: Set<string>;
 
   private uv4LogFile: File;
-  private uv4LogLockFileWatcher: FileWatcher;
 
-  /** max number of '.d' files read at the same time when refreshing source refs */
+  /** 刷新依赖列表时最多同时读取的 '.d' 文件数量 */
   private static readonly REFS_CONCURRENCY = 32;
 
   private sourceRefsUpdating: Promise<void> | undefined;
   private sourceRefsDirty = false;
-  private sourceRefsTimer?: NodeJS.Timeout;
+
+  /** 是否已经关闭，关闭后不再发起刷新 */
+  private isClosed = false;
 
   constructor(
     prjInfo: KeilProjectInfo,
@@ -701,28 +873,6 @@ abstract class Target implements IView {
     this.uv4LogFile = new File(
       this.project.vscodeDir.path + File.sep + "uv4.log",
     );
-    this.uv4LogLockFileWatcher = new FileWatcher(
-      new File(this.uv4LogFile.path + ".lock"),
-    );
-
-    if (!this.uv4LogLockFileWatcher.file.IsFile()) {
-      // create file if not existed
-      this.uv4LogLockFileWatcher.file.Write("");
-    }
-
-    this.uv4LogLockFileWatcher.Watch();
-    this.uv4LogLockFileWatcher.OnChanged = () =>
-      this.scheduleSourceRefsUpdate();
-    this.uv4LogLockFileWatcher.on("error", () => {
-      this.uv4LogLockFileWatcher.Close();
-
-      if (!this.uv4LogLockFileWatcher.file.IsFile()) {
-        // create file if not existed
-        this.uv4LogLockFileWatcher.file.Write("");
-      }
-
-      this.uv4LogLockFileWatcher.Watch();
-    });
   }
 
   on(event: "dataChanged", listener: () => void): this {
@@ -743,11 +893,10 @@ abstract class Target implements IView {
   }
 
   /**
-   * Builds this target's entry for '.vscode/c_cpp_properties.json'.
+   * 生成该 Target 在 '.vscode/c_cpp_properties.json' 里的配置项。
    *
-   * The file itself is written once per project load (see KeilProject), instead
-   * of once per target, which used to mean read+parse+write of the same file
-   * for every target of the project.
+   * 文件由 KeilProject 在工程加载完成后统一写一次，而不是每个 Target
+   * 各读写一遍同一个文件。
    */
   getCppPropertiesConfig(): CppConfiguration {
     return {
@@ -759,7 +908,7 @@ abstract class Target implements IView {
   }
 
   async load(): Promise<void> {
-    // check target is valid
+    // 检查目标是否可用
     const err = this.checkProject(this.targetDOM);
     if (err) {
       throw err;
@@ -770,7 +919,7 @@ abstract class Target implements IView {
     const groups = this.getGroups(this.targetDOM);
     const sysIncludes = this.getSystemIncludes(this.targetDOM);
 
-    // set includes
+    // 设置头文件路径
     this.includes.clear();
 
     let incList = incListStr.split(";");
@@ -785,22 +934,22 @@ abstract class Target implements IView {
       }
     });
 
-    // set defines
+    // 设置预处理宏
     this.defines.clear();
 
-    // add user macros
+    // 添加用户自定义宏
     defineListStr.split(/,|\s+/).forEach((define) => {
       if (define.trim() !== "") {
         this.defines.add(define);
       }
     });
 
-    // add system macros
+    // 添加系统宏
     this.getSysDefines(this.targetDOM).forEach((define) => {
       this.defines.add(define);
     });
 
-    // set file groups
+    // 构建文件分组
     this.fGroups = [];
 
     for (const group of groups) {
@@ -873,6 +1022,16 @@ abstract class Target implements IView {
 
   private runTask(name: string, commands: string[]) {
     const resManager = ResourceManager.getInstance();
+    const builderExe = resManager.getBuilderExe();
+
+    if (!builderExe) {
+      // 'bin' 目录缺失时明确报错，而不是拼一个不存在的路径去执行
+      vscode.window.showErrorMessage(
+        "Uv4Caller.exe not found, please reinstall the Keil Assistant extension !",
+      );
+      return;
+    }
+
     let args: string[] = [];
 
     args.push("-o", this.uv4LogFile.path);
@@ -883,15 +1042,14 @@ abstract class Target implements IView {
     const invokePrefix = isCmd ? "" : "& ";
     const cmdPrefixSuffix = isCmd ? '"' : "";
 
-    let commandLine =
-      invokePrefix + this.quoteString(resManager.getBuilderExe(), quote) + " ";
+    let commandLine = invokePrefix + this.quoteString(builderExe, quote) + " ";
     commandLine += args
       .map((arg) => {
         return this.quoteString(arg, quote);
       })
       .join(" ");
 
-    // use task
+    // 有工作区时用任务运行
     if (
       vscode.workspace.workspaceFolders &&
       vscode.workspace.workspaceFolders.length > 0
@@ -942,28 +1100,16 @@ abstract class Target implements IView {
   }
 
   /**
-   * Coalesces '.d' refresh requests: the lock file may change many times during
-   * a single build, and concurrent refreshes would read the same files twice.
-   */
-  private scheduleSourceRefsUpdate() {
-    if (this.sourceRefsTimer !== undefined) {
-      clearTimeout(this.sourceRefsTimer);
-    }
-
-    this.sourceRefsTimer = setTimeout(() => {
-      this.sourceRefsTimer = undefined;
-      void this.updateSourceRefs();
-    }, 500);
-  }
-
-  /**
-   * Rebuilds the dependency ('*.d') children of every enabled source file.
+   * 重新解析每个启用源文件的 '.d' 依赖列表。
    *
-   * Reads are asynchronous and bounded, so the extension host is not blocked
-   * while a build produces them (the previous sync implementation issued a stat
-   * and a blocking read per source file).
+   * 读取是异步且限并发的，不会阻塞扩展宿主进程；
+   * 旧实现是同步的，每个源文件都要 stat 一次再阻塞读一次。
    */
   updateSourceRefs(): Promise<void> {
+    if (this.isClosed) {
+      return Promise.resolve();
+    }
+
     if (this.sourceRefsUpdating !== undefined) {
       this.sourceRefsDirty = true;
       return this.sourceRefsUpdating;
@@ -1000,19 +1146,28 @@ abstract class Target implements IView {
     for (const group of this.fGroups) {
       for (const source of group.sources) {
         if (!source.enable) {
-          // if source not disabled
+          // 跳过被禁用的源文件
           continue;
         }
 
         tasks.push(async () => {
+          const dPath = File.fromArray([
+            outPath,
+            source.file.noSuffixName + ".d",
+          ]).path;
+
           let content: string;
           try {
-            content = await fs.promises.readFile(
-              File.fromArray([outPath, source.file.noSuffixName + ".d"]).path,
-              "utf8",
-            );
+            // 只 stat 一次：编译后大部分 '.d' 都没变，无需重复读取和解析
+            const stats = await fs.promises.stat(dPath);
+            if (source.refMtimeMs === stats.mtimeMs) {
+              return;
+            }
+
+            content = await fs.promises.readFile(dPath, "utf8");
+            source.refMtimeMs = stats.mtimeMs;
           } catch {
-            return; // the file has not been built yet
+            return; // 该文件还没有被编译过
           }
 
           const refFileList = this.parseRefLines(
@@ -1024,13 +1179,12 @@ abstract class Target implements IView {
 
           const signature = refFileList.join("\n");
           if (source.refSig === signature) {
-            return; // dependency list unchanged, keep the current nodes
+            return; // 依赖列表没有变化，保留现有节点
           }
 
           source.refSig = signature;
-          source.children = refFileList.map((refFilePath) => {
-            return new Source(source.prjID, new File(refFilePath));
-          });
+          // 只记录路径，子节点等真正展开该文件时再创建
+          source.setRefPaths(refFileList);
           changed = true;
         });
       }
@@ -1042,22 +1196,21 @@ abstract class Target implements IView {
       );
     }
 
-    if (changed) {
+    if (changed && !this.isClosed) {
       this._event.emit("dataChanged");
     }
   }
 
   close() {
-    if (this.sourceRefsTimer !== undefined) {
-      clearTimeout(this.sourceRefsTimer);
-      this.sourceRefsTimer = undefined;
-    }
-
-    this.uv4LogLockFileWatcher.Close();
+    this.isClosed = true;
   }
 
   getChildViews(): IView[] | undefined {
     return this.fGroups;
+  }
+
+  hasChildViews(): boolean {
+    return true;
   }
 
   protected abstract checkProject(target: XmlNode): Error | undefined;
@@ -1434,19 +1587,19 @@ class ArmTarget extends Target {
     const isArmClang = getXmlText(target["uAC6"]) === "1";
 
     if (isArmClang) {
-      // ARMClang
+      // ARMClang 编译器
       return this.gnu_parseRefLines(lines);
     } else {
-      // ARMCC
+      // ARMCC 编译命令
       return this.ac5_parseRefLines(lines);
     }
   }
 
   /**
-   * Probes the built-in macros of armclang.
+   * 探测 armclang 的内置宏。
    *
-   * This spawns a compiler process, so it is done on first use (an ARMCC only
-   * workspace never pays for it) and the result is cached for the session.
+   * 这里会拉起一个编译器进程，所以推迟到真正用到时再做（只用 ARMCC 的
+   * 工程完全不会付出这个代价），结果在本次会话内缓存。
    */
   private static initArmclangMacros() {
     if (ArmTarget.armclangBuildinMacros === undefined) {
@@ -1471,14 +1624,14 @@ class ArmTarget extends Target {
   protected getSysDefines(target: XmlNode): string[] {
     const isArmClang = getXmlText(target["uAC6"]) === "1";
     if (isArmClang) {
-      // ARMClang
+      // ARMClang 编译命令
       ArmTarget.initArmclangMacros();
 
       return ArmTarget.armclangMacros.concat(
         ArmTarget.armclangBuildinMacros || [],
       );
     } else {
-      // ARMCC
+      // ARMCC 编译命令
       return ArmTarget.armccMacros;
     }
   }
@@ -1620,7 +1773,9 @@ class ArmTarget extends Target {
 
 //================================================
 
-class ProjectExplorer implements vscode.TreeDataProvider<IView> {
+class ProjectExplorer
+  implements vscode.TreeDataProvider<IView>, vscode.Disposable
+{
   private ItemClickCommand: string = "Item.Click";
 
   onDidChangeTreeData: vscode.Event<IView | IView[] | undefined | null | void>;
@@ -1630,6 +1785,9 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
 
   private prjList: Map<string, KeilProject>;
   private currentActiveProject: KeilProject | undefined;
+
+  /** 树视图刷新防抖计时器：一轮加载里会触发很多次 dataChanged */
+  private updateViewTimer?: NodeJS.Timeout;
 
   constructor(context: vscode.ExtensionContext) {
     this.prjList = new Map();
@@ -1645,6 +1803,7 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
         this.onItemClick(item),
       ),
     );
+    context.subscriptions.push(this);
   }
 
   async loadWorkspace() {
@@ -1687,29 +1846,54 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
   }
 
   async openProject(path: string): Promise<KeilProject | undefined> {
-    const nPrj = new KeilProject(new File(path));
-    if (!this.prjList.has(nPrj.prjID)) {
-      await nPrj.load();
-      nPrj.on("dataChanged", () => this.updateView());
-      this.prjList.set(nPrj.prjID, nPrj);
-
-      if (
-        this.currentActiveProject === undefined ||
-        this.currentActiveProject === null
-      ) {
-        this.currentActiveProject = nPrj;
-        this.currentActiveProject.active();
-      }
-
-      this.updateView();
-
-      return nPrj;
+    // 先按路径判重：重复打开时不再创建新的 KeilProject，
+    // 否则会白白创建一个文件监视器和一个日志写入流，然后被丢弃。
+    const prjID = getMD5(path);
+    const opened = this.prjList.get(prjID);
+    if (opened) {
+      return opened;
     }
+
+    const nPrj = new KeilProject(new File(path));
+
+    try {
+      await nPrj.load();
+    } catch (error) {
+      // 加载失败也要立刻释放已创建的资源，避免失败一次泄漏一批句柄
+      nPrj.close();
+      throw error;
+    }
+
+    nPrj.on("dataChanged", () => this.updateView());
+    this.prjList.set(nPrj.prjID, nPrj);
+
+    if (this.currentActiveProject === undefined) {
+      this.currentActiveProject = nPrj;
+      this.currentActiveProject.active();
+    }
+
+    this.updateView();
+
+    return nPrj;
   }
 
   async closeProject(pID: string) {
     const prj = this.prjList.get(pID);
     if (prj) {
+      // 关闭的是当前活动工程时要清空引用，否则后续命令会操作已释放的工程
+      if (this.currentActiveProject === prj) {
+        this.currentActiveProject = undefined;
+
+        // 还有别的工程打开时自动切换过去，避免编译命令找不到活动工程
+        for (const other of this.prjList.values()) {
+          if (other !== prj) {
+            this.currentActiveProject = other;
+            other.active();
+            break;
+          }
+        }
+      }
+
       prj.deactive();
       prj.close();
       this.prjList.delete(pID);
@@ -1759,17 +1943,46 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
         }
       }
     } else {
-      // get active target
+      // 取当前活动工程的当前活动目标
       if (this.currentActiveProject) {
-        return this.currentActiveProject.getActiveTarget();
+        const target = this.currentActiveProject.getActiveTarget();
+
+        if (target === undefined) {
+          vscode.window.showWarningMessage("Not found any active target !");
+        }
+
+        return target;
       } else {
         vscode.window.showWarningMessage("Not found any active project !");
       }
     }
   }
 
+  /**
+   * 合并同一时间窗口内的刷新请求：打开工程时每个 Target 都会触发一次
+   * dataChanged，逐次 fire 会让树视图反复重建。
+   */
   updateView() {
-    this.viewEvent.fire();
+    if (this.updateViewTimer !== undefined) {
+      return;
+    }
+
+    this.updateViewTimer = setTimeout(() => {
+      this.updateViewTimer = undefined;
+      this.viewEvent.fire();
+    }, 30);
+  }
+
+  dispose() {
+    if (this.updateViewTimer !== undefined) {
+      clearTimeout(this.updateViewTimer);
+      this.updateViewTimer = undefined;
+    }
+
+    this.prjList.forEach((prj) => prj.close());
+    this.prjList.clear();
+    this.currentActiveProject = undefined;
+    this.viewEvent.dispose();
   }
 
   //----------------------------------
@@ -1784,7 +1997,7 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
           const file = new File(node_path.normalize(source.file.path));
 
           if (file.IsFile()) {
-            // file exist, open it
+            // 文件存在，直接打开
 
             let isPreview: boolean = true;
 
@@ -1796,7 +2009,7 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
               isPreview = false;
             }
 
-            // reset prev click info
+            // 重置上一次点击记录
             this.itemClickInfo = {
               name: file.path,
               time: Date.now(),
@@ -1822,10 +2035,9 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
 
     res.contextValue = element.contextVal;
     res.tooltip = element.tooltip;
-    res.collapsibleState =
-      element.getChildViews() === undefined
-        ? vscode.TreeItemCollapsibleState.None
-        : vscode.TreeItemCollapsibleState.Collapsed;
+    res.collapsibleState = element.hasChildViews()
+      ? vscode.TreeItemCollapsibleState.Collapsed
+      : vscode.TreeItemCollapsibleState.None;
 
     if (element instanceof Source) {
       res.command = {

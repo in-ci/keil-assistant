@@ -20,10 +20,21 @@ export class FileWatcher {
     this._event = new events.EventEmitter();
   }
 
-on(event: 'error', listener: (err: Error) => void): this {
+  on(event: "error", listener: (err: Error) => void): this {
     this._event.on(event, listener);
     return this;
-}
+  }
+
+  /**
+   * 转发监视错误。
+   * EventEmitter 在 'error' 事件没有监听者时会直接抛出异常，
+   * 而工程文件监视这类调用方通常并不关心错误，必须先判断有无监听者。
+   */
+  private emitError(err: unknown) {
+    if (this._event.listenerCount("error") > 0) {
+      this._event.emit("error", err);
+    }
+  }
 
   Watch(): this {
     if (this.isDir && this.selfWatcher === undefined) {
@@ -41,7 +52,7 @@ on(event: 'error', listener: (err: Error) => void): this {
         },
       );
       this.selfWatcher.on("error", (err) => {
-        this._event.emit("error", err);
+        this.emitError(err);
       });
     }
 
@@ -82,7 +93,7 @@ on(event: 'error', listener: (err: Error) => void): this {
         },
       );
       this.watcher.on("error", (err) => {
-        this._event.emit("error", err);
+        this.emitError(err);
       });
     }
     return this;

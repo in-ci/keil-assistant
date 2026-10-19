@@ -8,17 +8,39 @@ export class File {
   static EMPTY_FILTER: RegExp[] = [];
 
   readonly name: string; // example 'demo.cpp'
-  readonly noSuffixName: string; // example 'demo'
-  readonly suffix: string; // example '.cpp'
-  readonly dir: string; // example 'd:\\dir'
   readonly path: string; // example 'd:\\dir\\demo.cpp'
+
+  // dir / noSuffixName / suffix 采用惰性求值：
+  // 建立工程树时每个源文件（以及每次构建后每个依赖文件）都会创建一个 File 对象，
+  // 而渲染时通常只用到 name/path，dirname/extname 能省则省。
+  private _noSuffixName?: string;
+  private _suffix?: string;
+  private _dir?: string;
 
   constructor(fPath: string) {
     this.path = fPath;
     this.name = Path.basename(fPath);
-    this.noSuffixName = this.GetNoSuffixName(this.name);
-    this.suffix = Path.extname(fPath);
-    this.dir = Path.dirname(fPath);
+  }
+
+  get noSuffixName(): string {
+    if (this._noSuffixName === undefined) {
+      this._noSuffixName = this.GetNoSuffixName(this.name);
+    }
+    return this._noSuffixName;
+  }
+
+  get suffix(): string {
+    if (this._suffix === undefined) {
+      this._suffix = Path.extname(this.path);
+    }
+    return this._suffix;
+  }
+
+  get dir(): string {
+    if (this._dir === undefined) {
+      this._dir = Path.dirname(this.path);
+    }
+    return this._dir;
   }
 
   static fromArray(pathArray: string[]): File {
@@ -53,14 +75,14 @@ export class File {
     
             let path = _path;
     
-            // delete '..' of path
+            // 去掉路径中的 '..'
             let parts = path.split('/');
             let index = -1;
             while ((index = parts.indexOf('..')) > 0) {
                 parts.splice(index - 1, 2);
             }
     
-            // delete '.' of path
+            // 去掉路径中的 '.'
             path = parts.join('/').replace(/\/\.(?=\/)/g, '');
     
             return path;
