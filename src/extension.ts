@@ -305,9 +305,9 @@ class KeilProject implements IView, KeilProjectInfo {
     this.watcher.Watch();
   }
 
-  on(event: "dataChanged", listener: () => void): void;
-  on(event: any, listener: () => void): void {
+  on(event: "dataChanged", listener: () => void): this {
     this._event.on(event, listener);
+    return this;
   }
 
   private async onReload() {
@@ -509,9 +509,9 @@ abstract class Target implements IView {
     });
   }
 
-  on(event: "dataChanged", listener: () => void): void;
-  on(event: any, listener: () => void): void {
+  on(event: "dataChanged", listener: () => void): this {
     this._event.on(event, listener);
+    return this;
   }
 
   static getInstance(
@@ -838,15 +838,15 @@ class C51Target extends Target {
     }
   }
 
-  protected parseRefLines(target: any, lines: string[]): string[] {
+  protected parseRefLines(_target: any, _lines: string[]): string[] {
     return [];
   }
 
-  protected getOutputFolder(target: any): string | undefined {
+  protected getOutputFolder(_target: any): string | undefined {
     return undefined;
   }
 
-  protected getSysDefines(target: any): string[] {
+  protected getSysDefines(_target: any): string[] {
     return [
       "__C51__",
       "__VSCODE_C51__",
@@ -873,7 +873,7 @@ class C51Target extends Target {
     ];
   }
 
-  protected getSystemIncludes(target: any): string[] | undefined {
+  protected getSystemIncludes(_target: any): string[] | undefined {
     const exeFile = new File(ResourceManager.getInstance().getC51UV4Path());
     if (exeFile.IsFile()) {
       return [
@@ -1111,7 +1111,7 @@ class ArmTarget extends Target {
       return <string>(
         target["TargetOption"]["TargetCommonOption"]["OutputDirectory"]
       );
-    } catch (error) {
+    } catch {
       return undefined;
     }
   }
@@ -1229,7 +1229,7 @@ class ArmTarget extends Target {
         });
 
       return resList;
-    } catch (error) {
+    } catch {
       return ["__GNUC__=4", "__GNUC_MINOR__=2", "__GNUC_PATCHLEVEL__=1"];
     }
   }

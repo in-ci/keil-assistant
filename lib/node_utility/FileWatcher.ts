@@ -20,11 +20,10 @@ export class FileWatcher {
     this._event = new events.EventEmitter();
   }
 
-  on(event: "error", listener: (err: Error) => void): this;
-  on(event: any, listener: (arg?: any) => void): this {
+on(event: 'error', listener: (err: Error) => void): this {
     this._event.on(event, listener);
     return this;
-  }
+}
 
   Watch(): this {
     if (this.isDir && this.selfWatcher === undefined) {
