@@ -149,7 +149,6 @@ interface IView {
 class Source implements IView {
   label: string;
   prjID: string;
-  icons?: { light: string; dark: string } | undefined;
   tooltip?: string | undefined;
   contextVal?: string | undefined = "Source";
 
@@ -159,23 +158,34 @@ class Source implements IView {
 
   children: Source[] | undefined;
 
+  /** signature of the last parsed '.d' dependency list, used to skip needless view refreshes */
+  refSig?: string;
+
+  private _icons?: { light: string; dark: string };
+
+  // The icon depends on whether the file exists on disk. Resolving it lazily
+  // keeps the (potentially thousands of) dependency nodes created after a build
+  // from doing a filesystem stat each, and only visible nodes are ever rendered.
+  get icons(): { light: string; dark: string } {
+    if (this._icons === undefined) {
+      const iconName = !this.file.IsFile()
+        ? "FileWarning_16x"
+        : !this.enable
+          ? "FileExclude_16x"
+          : this.getIconBySuffix(this.file.suffix.toLowerCase());
+
+      this._icons = { dark: iconName, light: iconName };
+    }
+
+    return this._icons;
+  }
+
   constructor(pID: string, f: File, _enable: boolean = true) {
     this.prjID = pID;
     this.enable = _enable;
     this.file = f;
     this.label = this.file.name;
     this.tooltip = f.path;
-
-    const iconName = !f.IsFile()
-      ? "FileWarning_16x"
-      : !_enable
-        ? "FileExclude_16x"
-        : this.getIconBySuffix(f.suffix.toLowerCase());
-
-    this.icons = {
-      dark: iconName,
-      light: iconName,
-    };
   }
 
   private getIconBySuffix(suffix: string): string {
@@ -271,6 +281,10 @@ class KeilProject implements IView, KeilProjectInfo {
   private activeTargetName: string | undefined;
   private prevUpdateTime: number | undefined;
 
+  /** guards against overlapping reloads triggered by rapid project-file saves */
+  private isReloading = false;
+  private reloadAgain = false;
+
   protected _event: event.EventEmitter;
   protected watcher: FileWatcher;
   protected targetList: Target[];
@@ -311,6 +325,14 @@ class KeilProject implements IView, KeilProjectInfo {
   }
 
   private async onReload() {
+    if (this.isReloading) {
+      // a reload is already scanning the project, run one more when it is done
+      this.reloadAgain = true;
+      return;
+    }
+
+    this.isReloading = true;
+
     try {
       this.targetList.forEach((target) => target.close());
       this.targetList = [];
@@ -334,6 +356,13 @@ class KeilProject implements IView, KeilProjectInfo {
         vscode.window.showErrorMessage(
           `reload project failed !, msg: ${errorMessage}`,
         );
+      }
+    } finally {
+      this.isReloading = false;
+
+      if (this.reloadAgain) {
+        this.reloadAgain = false;
+        setTimeout(() => this.onReload(), 300);
       }
     }
   }
@@ -365,6 +394,64 @@ class KeilProject implements IView, KeilProjectInfo {
     for (const target of this.targetList) {
       await target.load();
       target.on("dataChanged", () => this.notifyUpdateView());
+    }
+
+    this.updateCppProperties();
+  }
+
+  /**
+   * Writes the include/define settings of every target into
+   * '.vscode/c_cpp_properties.json' in one go.
+   *
+   * It used to be rewritten once per target (read + parse + write of the same
+   * file each time), and unconditionally, so the C/C++ extension reloaded its
+   * configuration even when nothing had changed.
+   */
+  private updateCppProperties() {
+    const proFile = new File(
+      this.vscodeDir.path + File.sep + "c_cpp_properties.json",
+    );
+
+    let origin: string | undefined;
+    let obj: any;
+
+    if (proFile.IsFile()) {
+      try {
+        origin = proFile.Read();
+        obj = JSON.parse(origin);
+      } catch (error) {
+        this.logger.log(error);
+      }
+    }
+
+    if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+      obj = { configurations: [], version: 4 };
+    }
+
+    if (!Array.isArray(obj["configurations"])) {
+      obj["configurations"] = [];
+    }
+
+    const configList: any[] = obj["configurations"];
+
+    for (const target of this.targetList) {
+      const config = target.getCppPropertiesConfig();
+      const index = configList.findIndex((conf) => {
+        return (
+          conf !== null && typeof conf === "object" && conf.name === config.name
+        );
+      });
+
+      if (index === -1) {
+        configList.push(config);
+      } else {
+        configList[index] = Object.assign({}, configList[index], config);
+      }
+    }
+
+    const content = JSON.stringify(obj, undefined, 4);
+    if (content !== origin) {
+      proFile.Write(content);
     }
   }
 
@@ -470,6 +557,13 @@ abstract class Target implements IView {
   private uv4LogFile: File;
   private uv4LogLockFileWatcher: FileWatcher;
 
+  /** max number of '.d' files read at the same time when refreshing source refs */
+  private static readonly REFS_CONCURRENCY = 32;
+
+  private sourceRefsUpdating: Promise<void> | undefined;
+  private sourceRefsDirty = false;
+  private sourceRefsTimer?: NodeJS.Timeout;
+
   constructor(prjInfo: KeilProjectInfo, uvInfo: uVisonInfo, targetDOM: any) {
     this._event = new event.EventEmitter();
     this.project = prjInfo;
@@ -496,7 +590,8 @@ abstract class Target implements IView {
     }
 
     this.uv4LogLockFileWatcher.Watch();
-    this.uv4LogLockFileWatcher.OnChanged = () => this.updateSourceRefs();
+    this.uv4LogLockFileWatcher.OnChanged = () =>
+      this.scheduleSourceRefsUpdate();
     this.uv4LogLockFileWatcher.on("error", () => {
       this.uv4LogLockFileWatcher.Close();
 
@@ -526,57 +621,20 @@ abstract class Target implements IView {
     }
   }
 
-  private getDefCppProperties(): any {
+  /**
+   * Builds this target's entry for '.vscode/c_cpp_properties.json'.
+   *
+   * The file itself is written once per project load (see KeilProject), instead
+   * of once per target, which used to mean read+parse+write of the same file
+   * for every target of the project.
+   */
+  getCppPropertiesConfig(): any {
     return {
-      configurations: [
-        {
-          name: this.cppConfigName,
-          includePath: undefined,
-          defines: undefined,
-          intelliSenseMode: "${default}",
-        },
-      ],
-      version: 4,
+      name: this.cppConfigName,
+      includePath: Array.from(this.includes).concat(["${default}"]),
+      defines: Array.from(this.defines),
+      intelliSenseMode: "${default}",
     };
-  }
-
-  private updateCppProperties() {
-    const proFile = new File(
-      this.project.vscodeDir.path + File.sep + "c_cpp_properties.json",
-    );
-    let obj: any;
-
-    if (proFile.IsFile()) {
-      try {
-        obj = JSON.parse(proFile.Read());
-      } catch (error) {
-        this.project.logger.log(error);
-        obj = this.getDefCppProperties();
-      }
-    } else {
-      obj = this.getDefCppProperties();
-    }
-
-    const configList: any[] = obj["configurations"];
-    const index = configList.findIndex((conf) => {
-      return conf.name === this.cppConfigName;
-    });
-
-    if (index === -1) {
-      configList.push({
-        name: this.cppConfigName,
-        includePath: Array.from(this.includes).concat(["${default}"]),
-        defines: Array.from(this.defines),
-        intelliSenseMode: "${default}",
-      });
-    } else {
-      configList[index]["includePath"] = Array.from(this.includes).concat([
-        "${default}",
-      ]);
-      configList[index]["defines"] = Array.from(this.defines);
-    }
-
-    proFile.Write(JSON.stringify(obj, undefined, 4));
   }
 
   async load(): Promise<void> {
@@ -690,9 +748,7 @@ abstract class Target implements IView {
       }
     }
 
-    this.updateCppProperties();
-
-    this.updateSourceRefs();
+    await this.updateSourceRefs();
   }
 
   private quoteString(str: string, quote: string = '"'): string {
@@ -769,37 +825,118 @@ abstract class Target implements IView {
     this.runTask("download", this.getDownloadCommand());
   }
 
-  updateSourceRefs() {
-    const rePath = this.getOutputFolder(this.targetDOM);
-    if (rePath) {
-      const outPath = this.project.toAbsolutePath(rePath);
-      this.fGroups.forEach((group) => {
-        group.sources.forEach((source) => {
-          if (source.enable) {
-            // if source not disabled
-            const refFile = File.fromArray([
-              outPath,
-              source.file.noSuffixName + ".d",
-            ]);
-            if (refFile.IsFile()) {
-              const refFileList = this.parseRefLines(
-                this.targetDOM,
-                refFile.Read().split(/\r\n|\n/),
-              ).map((rePath) => {
-                return this.project.toAbsolutePath(rePath);
-              });
-              source.children = refFileList.map((refFilePath) => {
-                return new Source(source.prjID, new File(refFilePath));
-              });
-            }
-          }
-        });
+  /**
+   * Coalesces '.d' refresh requests: the lock file may change many times during
+   * a single build, and concurrent refreshes would read the same files twice.
+   */
+  private scheduleSourceRefsUpdate() {
+    if (this.sourceRefsTimer !== undefined) {
+      clearTimeout(this.sourceRefsTimer);
+    }
+
+    this.sourceRefsTimer = setTimeout(() => {
+      this.sourceRefsTimer = undefined;
+      void this.updateSourceRefs();
+    }, 500);
+  }
+
+  /**
+   * Rebuilds the dependency ('*.d') children of every enabled source file.
+   *
+   * Reads are asynchronous and bounded, so the extension host is not blocked
+   * while a build produces them (the previous sync implementation issued a stat
+   * and a blocking read per source file).
+   */
+  updateSourceRefs(): Promise<void> {
+    if (this.sourceRefsUpdating !== undefined) {
+      this.sourceRefsDirty = true;
+      return this.sourceRefsUpdating;
+    }
+
+    const run = (async () => {
+      do {
+        this.sourceRefsDirty = false;
+        await this.doUpdateSourceRefs();
+      } while (this.sourceRefsDirty);
+    })();
+
+    this.sourceRefsUpdating = run
+      .catch((error: unknown) => {
+        this.project.logger.log(error);
+      })
+      .finally(() => {
+        this.sourceRefsUpdating = undefined;
       });
+
+    return this.sourceRefsUpdating;
+  }
+
+  private async doUpdateSourceRefs(): Promise<void> {
+    const rePath = this.getOutputFolder(this.targetDOM);
+    if (!rePath) {
+      return;
+    }
+
+    const outPath = this.project.toAbsolutePath(rePath);
+    const tasks: (() => Promise<void>)[] = [];
+    let changed = false;
+
+    for (const group of this.fGroups) {
+      for (const source of group.sources) {
+        if (!source.enable) {
+          // if source not disabled
+          continue;
+        }
+
+        tasks.push(async () => {
+          let content: string;
+          try {
+            content = await fs.promises.readFile(
+              File.fromArray([outPath, source.file.noSuffixName + ".d"]).path,
+              "utf8",
+            );
+          } catch {
+            return; // the file has not been built yet
+          }
+
+          const refFileList = this.parseRefLines(
+            this.targetDOM,
+            content.split(/\r\n|\n/),
+          ).map((rePath) => {
+            return this.project.toAbsolutePath(rePath);
+          });
+
+          const signature = refFileList.join("\n");
+          if (source.refSig === signature) {
+            return; // dependency list unchanged, keep the current nodes
+          }
+
+          source.refSig = signature;
+          source.children = refFileList.map((refFilePath) => {
+            return new Source(source.prjID, new File(refFilePath));
+          });
+          changed = true;
+        });
+      }
+    }
+
+    for (let i = 0; i < tasks.length; i += Target.REFS_CONCURRENCY) {
+      await Promise.all(
+        tasks.slice(i, i + Target.REFS_CONCURRENCY).map((task) => task()),
+      );
+    }
+
+    if (changed) {
       this._event.emit("dataChanged");
     }
   }
 
   close() {
+    if (this.sourceRefsTimer !== undefined) {
+      clearTimeout(this.sourceRefsTimer);
+      this.sourceRefsTimer = undefined;
+    }
+
     this.uv4LogLockFileWatcher.Close();
   }
 
@@ -1097,11 +1234,6 @@ class ArmTarget extends Target {
 
   private static armclangBuildinMacros: string[] | undefined;
 
-  constructor(prjInfo: KeilProjectInfo, uvInfo: uVisonInfo, targetDOM: any) {
-    super(prjInfo, uvInfo, targetDOM);
-    ArmTarget.initArmclangMacros();
-  }
-
   protected checkProject(): Error | undefined {
     return undefined;
   }
@@ -1172,6 +1304,12 @@ class ArmTarget extends Target {
     }
   }
 
+  /**
+   * Probes the built-in macros of armclang.
+   *
+   * This spawns a compiler process, so it is done on first use (an ARMCC only
+   * workspace never pays for it) and the result is cached for the session.
+   */
   private static initArmclangMacros() {
     if (ArmTarget.armclangBuildinMacros === undefined) {
       const armClangPath =
@@ -1186,14 +1324,17 @@ class ArmTarget extends Target {
         "bin" +
         File.sep +
         "armclang.exe";
-      ArmTarget.armclangBuildinMacros =
-        ArmTarget.getArmClangMacroList(armClangPath);
+      ArmTarget.armclangBuildinMacros = new File(armClangPath).IsFile()
+        ? ArmTarget.getArmClangMacroList(armClangPath)
+        : ["__GNUC__=4", "__GNUC_MINOR__=2", "__GNUC_PATCHLEVEL__=1"];
     }
   }
 
   protected getSysDefines(target: any): string[] {
     if (target["uAC6"] === "1") {
       // ARMClang
+      ArmTarget.initArmclangMacros();
+
       return ArmTarget.armclangMacros.concat(
         ArmTarget.armclangBuildinMacros || [],
       );
@@ -1211,7 +1352,11 @@ class ArmTarget extends Target {
         ["--target=arm-arm-none-eabi", "-E", "-dM", "-", "<nul"].join(" ");
 
       const lines = child_process
-        .execSync(cmdLine)
+        .execSync(cmdLine, {
+          timeout: 20000,
+          windowsHide: true,
+          maxBuffer: 4 * 1024 * 1024,
+        })
         .toString()
         .split(/\r\n|\n/);
       const resList: string[] = [];
@@ -1527,15 +1672,16 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView> {
       };
     }
 
-    if (element.icons) {
+    const icons = element.icons;
+    if (icons) {
       const resources = ResourceManager.getInstance();
-      const lightPath = resources.getIconByName(element.icons.light);
-      const darkPath = resources.getIconByName(element.icons.dark);
+      const lightUri = resources.getIconUri(icons.light);
+      const darkUri = resources.getIconUri(icons.dark);
 
-      if (lightPath && darkPath) {
+      if (lightUri && darkUri) {
         res.iconPath = {
-          light: vscode.Uri.file(lightPath),
-          dark: vscode.Uri.file(darkPath),
+          light: lightUri,
+          dark: darkUri,
         };
       }
     }

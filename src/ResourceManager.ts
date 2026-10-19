@@ -13,11 +13,13 @@ export class ResourceManager {
   private extensionDir: File;
   private dirMap: Map<string, File>;
   private iconMap: Map<string, string>;
+  private iconUriMap: Map<string, vscode.Uri>;
 
   private constructor(context: vscode.ExtensionContext) {
     this.extensionDir = new File(context.extensionPath);
     this.dirMap = new Map();
     this.iconMap = new Map();
+    this.iconUriMap = new Map();
     this.init();
   }
 
@@ -76,5 +78,24 @@ export class ResourceManager {
 
   getIconByName(name: string): string | undefined {
     return this.iconMap.get(name);
+  }
+
+  /**
+   * Cached vscode.Uri for an icon: the tree view asks for icons on every
+   * render, and creating the Uri objects again each time is pure garbage.
+   */
+  getIconUri(name: string): vscode.Uri | undefined {
+    let uri = this.iconUriMap.get(name);
+
+    if (uri === undefined) {
+      const iconPath = this.iconMap.get(name);
+      if (iconPath === undefined) {
+        return undefined;
+      }
+      uri = vscode.Uri.file(iconPath);
+      this.iconUriMap.set(name, uri);
+    }
+
+    return uri;
   }
 }

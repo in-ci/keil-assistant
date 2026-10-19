@@ -93,37 +93,27 @@ export class File {
     fileFilter?: RegExp[],
     dirFilter?: RegExp[],
   ): File[] {
-    const res: File[] = [];
+    const files: File[] = [];
+    const dirs: File[] = [];
 
-    if (fileFilter) {
-      fList.forEach((f) => {
-        if (f.IsFile() && this._match(f.name, isInverter, fileFilter)) {
-          res.push(f);
+    for (const f of fList) {
+      const stats = File._stat(f.path);
+      if (stats === undefined) {
+        continue;
+      }
+
+      if (stats.isFile()) {
+        if (!fileFilter || this._match(f.name, isInverter, fileFilter)) {
+          files.push(f);
         }
-      });
-    } else {
-      fList.forEach((f) => {
-        if (f.IsFile()) {
-          res.push(f);
+      } else if (stats.isDirectory()) {
+        if (!dirFilter || this._match(f.name, isInverter, dirFilter)) {
+          dirs.push(f);
         }
-      });
+      }
     }
 
-    if (dirFilter) {
-      fList.forEach((f) => {
-        if (f.IsDir() && this._match(f.name, isInverter, dirFilter)) {
-          res.push(f);
-        }
-      });
-    } else {
-      fList.forEach((f) => {
-        if (f.IsDir()) {
-          res.push(f);
-        }
-      });
-    }
-
-    return res;
+    return files.concat(dirs);
   }
 
   static Filter(
@@ -212,47 +202,39 @@ export class File {
 
   GetList(fileFilter?: RegExp[], dirFilter?: RegExp[]): File[] {
     const list: File[] = [];
-    fs.readdirSync(this.path).forEach((str: string) => {
-      if (str !== "." && str !== "..") {
-        const f = new File(this.path + Path.sep + str);
-        if (f.IsDir()) {
-          if (dirFilter) {
-            for (const reg of dirFilter) {
-              if (reg.test(f.name)) {
-                list.push(f);
-                break;
-              }
-            }
-          } else {
-            list.push(f);
-          }
-        } else {
-          if (fileFilter) {
-            for (const reg of fileFilter) {
-              if (reg.test(f.name)) {
-                list.push(f);
-                break;
-              }
-            }
-          } else {
-            list.push(f);
-          }
-        }
+
+    for (const name of fs.readdirSync(this.path)) {
+      if (name === "." || name === "..") {
+        continue;
       }
-    });
+
+      const fullPath = this.path + Path.sep + name;
+      const stats = File._stat(fullPath);
+      const isDir = stats !== undefined && stats.isDirectory();
+      const filter = isDir ? dirFilter : fileFilter;
+
+      if (filter && !File._match(name, false, filter)) {
+        continue;
+      }
+
+      list.push(new File(fullPath));
+    }
+
     return list;
   }
 
   GetAll(fileFilter?: RegExp[], dirFilter?: RegExp[]): File[] {
     const res: File[] = [];
 
-    let fStack: File[] = this.GetList(fileFilter);
+    const fStack: File[] = this.GetList(fileFilter);
     let f: File;
 
     while (fStack.length > 0) {
       f = <File>fStack.pop();
       if (f.IsDir()) {
-        fStack = fStack.concat(f.GetList(fileFilter));
+        for (const child of f.GetList(fileFilter)) {
+          fStack.push(child);
+        }
       }
       res.push(f);
     }
@@ -300,18 +282,22 @@ export class File {
     return fs.existsSync(this.path);
   }
 
-  IsFile(): boolean {
-    if (fs.existsSync(this.path)) {
-      return fs.lstatSync(this.path).isFile();
+  private static _stat(path: string): fs.Stats | undefined {
+    try {
+      return fs.lstatSync(path);
+    } catch {
+      return undefined;
     }
-    return false;
+  }
+
+  IsFile(): boolean {
+    const stats = File._stat(this.path);
+    return stats !== undefined && stats.isFile();
   }
 
   IsDir(): boolean {
-    if (fs.existsSync(this.path)) {
-      return fs.lstatSync(this.path).isDirectory();
-    }
-    return false;
+    const stats = File._stat(this.path);
+    return stats !== undefined && stats.isDirectory();
   }
 
   getHash(hashName?: string): string {
