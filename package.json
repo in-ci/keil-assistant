@@ -126,6 +126,14 @@
         }
       },
       {
+        "command": "project.buildAndDownload",
+        "title": "Build And Download",
+        "icon": {
+          "light": "./res/icons/TransferDownload_16x.svg",
+          "dark": "./res/icons/TransferDownload_16x.svg"
+        }
+      },
+      {
         "command": "item.copyValue",
         "title": "Copy Item Value",
         "icon": {
@@ -172,6 +180,11 @@
           "when": "viewItem == Target"
         },
         {
+          "command": "project.buildAndDownload",
+          "group": "inline",
+          "when": "viewItem == Target"
+        },
+        {
           "command": "item.copyValue",
           "group": "inline",
           "when": "viewItem == Source"
@@ -190,6 +203,10 @@
       {
         "command": "project.download",
         "key": "ctrl+alt+d"
+      },
+      {
+        "command": "project.buildAndDownload",
+        "key": "ctrl+alt+b"
       }
     ],
     "snippets": [

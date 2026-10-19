@@ -88,6 +88,15 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   subscriber.push(
+    vscode.commands.registerCommand(
+      "project.buildAndDownload",
+      (item: IView) => {
+        void prjExplorer.getTarget(item)?.buildAndDownload();
+      },
+    ),
+  );
+
+  subscriber.push(
     vscode.commands.registerCommand("item.copyValue", (item: IView) =>
       vscode.env.clipboard.writeText(item.tooltip || ""),
     ),
@@ -116,6 +125,13 @@ export function deactivate() {
 }
 
 //==================== Global Func===========================
+
+/** 当前是否有 keil 编译/下载任务正在运行 */
+function isKeilTaskRunning(): boolean {
+  return vscode.tasks.taskExecutions.some(
+    (execution) => execution.task.definition.type === "keil-task",
+  );
+}
 
 function getMD5(data: string): string {
   const md5 = crypto.createHash("md5");
@@ -461,6 +477,9 @@ class KeilProject implements IView, KeilProjectInfo {
   private isReloading = false;
   private reloadAgain = false;
 
+  /** 上一次成功加载时的工程文件内容，用于跳过没有实际变化的重载 */
+  private lastRawContent: string | undefined;
+
   /** '.vscode/keil-assistant.log' 的写入流，close() 时关闭，避免每次打开工程泄漏文件句柄 */
   private logStream: fs.WriteStream;
 
@@ -556,7 +575,21 @@ class KeilProject implements IView, KeilProjectInfo {
     this.isReloading = true;
 
     try {
-      await this.load();
+      const rawContent = this.uvprjFile.Read();
+
+      // 工程文件内容没有变化时不必整树重载。
+      // uv4.exe 在编译、下载过程中经常只是刷新了工程文件的时间戳，
+      // 真正变化的内容（Target/文件组）并没有变，此时重新解析 XML、
+      // 重建所有 Target 会白白占用 CPU，还会让侧边栏闪一下。
+      if (rawContent === this.lastRawContent) {
+        for (const target of this.targetList) {
+          void target.updateSourceRefs();
+        }
+
+        return;
+      }
+
+      await this.load(rawContent);
       this.notifyUpdateView();
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -587,11 +620,12 @@ class KeilProject implements IView, KeilProjectInfo {
     }
   }
 
-  async load(): Promise<void> {
+  async load(rawContent?: string): Promise<void> {
+    const xmlText = rawContent ?? this.uvprjFile.Read();
     const parser = new xml2js.Parser({ explicitArray: false });
 
     const doc: unknown = await parser.parseStringPromise({
-      toString: () => this.uvprjFile.Read(),
+      toString: () => xmlText,
     });
 
     const project = getXmlNode(doc, "Project");
@@ -638,6 +672,10 @@ class KeilProject implements IView, KeilProjectInfo {
     }
 
     this.updateCppProperties();
+
+    // 只有完整加载成功后才会记住文件内容，解析失败时不更新，
+    // 这样下次文件变化仍会触发一次完整重载
+    this.lastRawContent = xmlText;
   }
 
   /**
@@ -715,6 +753,14 @@ class KeilProject implements IView, KeilProjectInfo {
       this.uv4LogTimer = undefined;
 
       if (this.isClosed) {
+        return;
+      }
+
+      // 编译/下载期间 uv4.exe 会不断改写锁文件和 '.d' 文件，
+      // 这时刷新依赖列表既没有意义，还会和编译器抢磁盘；
+      // 推迟到任务结束后再刷新一次
+      if (isKeilTaskRunning()) {
+        this.scheduleSourceRefsUpdate();
         return;
       }
 
@@ -1020,7 +1066,10 @@ abstract class Target implements IView {
     return str.includes(" ") ? quote + str + quote : str;
   }
 
-  private runTask(name: string, commands: string[]) {
+  private runTask(
+    name: string,
+    commands: string[],
+  ): Thenable<vscode.TaskExecution> | undefined {
     const resManager = ResourceManager.getInstance();
     const builderExe = resManager.getBuilderExe();
 
@@ -1070,7 +1119,7 @@ abstract class Target implements IView {
         focus: false,
         clear: true,
       };
-      vscode.tasks.executeTask(task);
+      return vscode.tasks.executeTask(task);
     } else {
       const index = vscode.window.terminals.findIndex((ter) => {
         return ter.name === name;
@@ -1084,19 +1133,61 @@ abstract class Target implements IView {
       const terminal = vscode.window.createTerminal(name);
       terminal.show();
       terminal.sendText(commandLine);
+
+      return undefined;
     }
   }
 
   build() {
-    this.runTask("build", this.getBuildCommand());
+    void this.runTask("build", this.getBuildCommand());
   }
 
   rebuild() {
-    this.runTask("rebuild", this.getRebuildCommand());
+    void this.runTask("rebuild", this.getRebuildCommand());
   }
 
   download() {
-    this.runTask("download", this.getDownloadCommand());
+    void this.runTask("download", this.getDownloadCommand());
+  }
+
+  /** 编译进程退出后稍等一会儿再下载，给 uv4.exe 留出真正退出的时间 */
+  private static readonly DOWNLOAD_DELAY_MS = 300;
+
+  /**
+   * 编译，并在编译成功后立刻下载到开发板。
+   *
+   * uv4.exe 每次调用都要重新加载一遍工程，编译和下载各启动一次进程是
+   * Keil 命令行本身的限制；这里省掉的是两次调用之间的人工等待——
+   * 编译任务一结束就自动接着下载，不用盯着输出再手动点下载。
+   */
+  async buildAndDownload(): Promise<void> {
+    const execution = this.runTask("build", this.getBuildCommand());
+
+    // 没有工作区时 'runTask' 只能往终端下发命令，这里感知不到编译结束；
+    // 把两条命令硬拼在一起会让下载指令落进正在编译的进程里，
+    // 所以这种情况仍然由用户手动下载
+    if (execution === undefined) {
+      return;
+    }
+
+    const runningTask = await execution;
+
+    const subscription = vscode.tasks.onDidEndTaskProcess((event) => {
+      if (event.execution !== runningTask) {
+        return;
+      }
+
+      subscription.dispose();
+
+      // 编译失败时不再下载，避免把上一次生成的 bin 烧进板子
+      if (event.exitCode !== 0) {
+        return;
+      }
+
+      setTimeout(() => {
+        void this.runTask("download", this.getDownloadCommand());
+      }, Target.DOWNLOAD_DELAY_MS);
+    });
   }
 
   /**
