@@ -2,6 +2,14 @@
 
 All notable changes to the "keil-assistant" extension will be documented in this file.
 
+## [Unreleased]
+- New: remember the workspace root of each project in `.vscode/keil-assistant.json` (default: the project folder)
+- New: `Keil Assistant: Set Workspace Root` command and a "Change Location..." button to pick another workspace root
+- Optimize: generated `c_cpp_properties.json` follows the workspace root
+- Optimize: run-time files (`keil-assistant.log`, `uv4.log`, `uv4.log.lock`) follow the workspace root too
+- Optimize: split `extension.ts` into focused modules (common/model/services/explorer) and dedupe config/file-watching code
+***
+
 ## [v1.7.1]
 - Fixed: can't use shortcut key
 ***
