@@ -102,6 +102,11 @@
         }
       },
       {
+        "command": "project.setWorkspaceRoot",
+        "title": "Set Workspace Root",
+        "category": "Keil Assistant"
+      },
+      {
         "command": "project.build",
         "title": "Build",
         "icon": {
@@ -157,6 +162,10 @@
         },
         {
           "command": "project.active",
+          "when": "viewItem == Project"
+        },
+        {
+          "command": "project.setWorkspaceRoot",
           "when": "viewItem == Project"
         },
         {

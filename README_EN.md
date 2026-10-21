@@ -95,6 +95,20 @@ It provides syntax highlighting, code snippets for Keil projects, and supports c
   ]
   ```
 
+- Project workspace root: a `.vscode/keil-assistant.json` file is created next to the `.uvprojx` file to store the folder that should be opened as the workspace
+  ```json
+  {
+      "workspaceRoot": "."
+  }
+  ```
+  - `workspaceRoot` defaults to `.`, the folder that contains the project file (same as previous versions)
+  - Both relative paths (resolved against the project folder, e.g. `"../.."` for an MDK project under `Projects/MDK-ARM`) and absolute paths are supported
+  - After a project is opened, the extension asks whether to switch to that workspace; you can also use **Change Location...** in the notification or **Keil Assistant: Set Workspace Root** from the project context menu
+  - After switching, the project is registered in the target workspace `.vscode/keil-assistant.json` (`projectFiles`, relative path) so it is loaded automatically next time the workspace is opened
+  - If the configured folder does not exist, the project folder is used instead and a warning is shown
+
+  The generated `c_cpp_properties.json` is written to the `.vscode` folder of the current workspace root so that the C/C++ extension can pick it up
+
 ### Any other questions ?
 
 You can go to the following places to communicate

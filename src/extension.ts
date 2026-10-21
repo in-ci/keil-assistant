@@ -18,6 +18,28 @@ import { ResourceManager } from "./ResourceManager";
 import { FileWatcher } from "../lib/node_utility/FileWatcher";
 import { Time } from "../lib/node_utility/Time";
 import { CmdLineHandler } from "./CmdLineHandler";
+import {
+  PROJECT_CONFIG_FILE_NAME,
+  PROJECT_FILES_KEY,
+  WORKSPACE_ROOT_KEY,
+  readConfigObject,
+  readProjectFiles,
+  resolveProjectFile,
+  resolveWorkspaceRoot,
+  samePath,
+  toConfigPath,
+} from "./workspaceConfig";
+import type { WorkspaceRootInfo } from "./workspaceConfig";
+
+// 纯函数导出：不依赖 vscode，供 test/workspaceConfig.test.js 直接验证
+export {
+  readConfigObject,
+  readProjectFiles,
+  resolveProjectFile,
+  resolveWorkspaceRoot,
+  samePath,
+  toConfigPath,
+} from "./workspaceConfig";
 
 export function activate(context: vscode.ExtensionContext) {
   console.log("---- keil-assistant actived ----");
@@ -43,16 +65,11 @@ export function activate(context: vscode.ExtensionContext) {
         if (uri && uri.length > 0) {
           // 打开工程
           const uvPrjPath = uri[0].fsPath;
-          await prjExplorer.openProject(uvPrjPath);
+          const project = await prjExplorer.openProject(uvPrjPath);
 
-          // 切换工作区到工程所在目录
-          const result = await vscode.window.showInformationMessage(
-            "keil project load done !, switch workspace ?",
-            "Ok",
-            "Later",
-          );
-          if (result === "Ok") {
-            openWorkspace(new File(node_path.dirname(uvPrjPath)));
+          if (project) {
+            // 工作区位置来自工程配置，默认仍是工程文件所在目录
+            await prjExplorer.promptOpenWorkspace(project);
           }
         }
       } catch (error) {
@@ -66,6 +83,12 @@ export function activate(context: vscode.ExtensionContext) {
   subscriber.push(
     vscode.commands.registerCommand("project.close", (item: IView) =>
       prjExplorer.closeProject(item.prjID),
+    ),
+  );
+
+  subscriber.push(
+    vscode.commands.registerCommand("project.setWorkspaceRoot", (item: IView) =>
+      prjExplorer.setWorkspaceRootCommand(item),
     ),
   );
 
@@ -139,10 +162,22 @@ function getMD5(data: string): string {
   return md5.digest("hex");
 }
 
-function openWorkspace(wsFile: File) {
-  vscode.commands.executeCommand(
-    "vscode.openFolder",
-    vscode.Uri.parse(wsFile.ToUri()),
+/** 把当前窗口切换（重载）到指定目录作为工作区 */
+function openWorkspaceFolder(root: string) {
+  vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(root));
+}
+
+/** 指定目录是否已经是当前打开的工作区，避免重复触发窗口重载 */
+function isWorkspaceFolderOpen(root: string): boolean {
+  const folders = vscode.workspace.workspaceFolders;
+
+  if (!folders) {
+    return false;
+  }
+
+  return folders.some(
+    (folder) =>
+      folder.uri.scheme === "file" && samePath(folder.uri.fsPath, root),
   );
 }
 
@@ -489,6 +524,12 @@ class KeilProject implements IView, KeilProjectInfo {
   private uv4LogFileWatcher?: FileWatcher;
   private uv4LogTimer?: NodeJS.Timeout;
 
+  /** '.vscode/keil-assistant.json'：工程级配置（工作区位置等） */
+  private configFile: File;
+
+  /** 重新生成 'c_cpp_properties.json' 的防抖计时器 */
+  private cppPropertiesTimer?: NodeJS.Timeout;
+
   /** 是否已经关闭，关闭后不再响应监视事件 */
   private isClosed = false;
 
@@ -506,6 +547,10 @@ class KeilProject implements IView, KeilProjectInfo {
     this.logStream = fs.createWriteStream(logPath, { flags: "a+" });
     this.logger = new console.Console(this.logStream);
     this.uvprjFile = _uvprjFile;
+    this.configFile = new File(
+      this.vscodeDir.path + File.sep + PROJECT_CONFIG_FILE_NAME,
+    );
+    this.ensureConfigFile();
     this.watcher = new FileWatcher(this.uvprjFile);
     this.prjID = getMD5(_uvprjFile.path);
     this.label = _uvprjFile.noSuffixName;
@@ -537,12 +582,16 @@ class KeilProject implements IView, KeilProjectInfo {
 
     const uv4LogWatcher = new FileWatcher(this.vscodeDir);
     uv4LogWatcher.OnChanged = (file) => {
-      if (file.name === "uv4.log.lock") {
+      if (file.name === PROJECT_CONFIG_FILE_NAME) {
+        this.scheduleCppPropertiesUpdate();
+      } else if (file.name === "uv4.log.lock") {
         this.scheduleSourceRefsUpdate();
       }
     };
     uv4LogWatcher.OnRename = (file) => {
-      if (file.name === "uv4.log.lock") {
+      if (file.name === PROJECT_CONFIG_FILE_NAME) {
+        this.scheduleCppPropertiesUpdate();
+      } else if (file.name === "uv4.log.lock") {
         this.scheduleSourceRefsUpdate();
       }
     };
@@ -680,6 +729,91 @@ class KeilProject implements IView, KeilProjectInfo {
   }
 
   /**
+   * 第一次打开工程时创建默认配置：工作区仍是工程文件所在目录。
+   * 配置文件已存在时绝不覆盖，保留用户写入的 workspaceRoot。
+   */
+  private ensureConfigFile(): void {
+    if (this.configFile.IsFile()) {
+      return;
+    }
+
+    try {
+      this.configFile.Write(
+        JSON.stringify({ [WORKSPACE_ROOT_KEY]: "." }, undefined, 4) + "\n",
+      );
+      this.logger.log(`[info] project config created: ${this.configFile.path}`);
+    } catch (error) {
+      // 创建失败只影响“记住工作区位置”，工程本身仍可正常打开
+      this.logger.log(
+        `[Warn] create project config failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * 读取工程配置，得到打开工程时应使用的工作区根目录。
+   * 每次调用都重新读取文件，用户修改配置后无需重载窗口即可生效。
+   */
+  getWorkspaceRootInfo(): WorkspaceRootInfo {
+    const config = readConfigObject(this.configFile);
+
+    return resolveWorkspaceRoot(
+      this.uvprjFile.dir,
+      config?.[WORKSPACE_ROOT_KEY],
+    );
+  }
+
+  /** 打开工程时实际使用的工作区根目录 */
+  getWorkspaceRoot(): string {
+    return this.getWorkspaceRootInfo().root;
+  }
+
+  /** 保存工作区根目录到工程配置，下次打开工程时自动使用 */
+  setWorkspaceRoot(root: string): void {
+    const config = readConfigObject(this.configFile) ?? {};
+
+    config[WORKSPACE_ROOT_KEY] = toConfigPath(this.uvprjFile.dir, root);
+    this.configFile.Write(JSON.stringify(config, undefined, 4) + "\n");
+    this.logger.log(
+      `[info] workspace root of '${this.label}' set to '${root}'`,
+    );
+  }
+
+  /**
+   * C/C++ 插件只读取工作区根目录下的 '.vscode/c_cpp_properties.json'，
+   * 所以生成位置要跟随工作区，而不是固定放在工程文件的 '.vscode' 里。
+   */
+  private getCppPropertiesFile(): File {
+    const vscodeDir = new File(this.getWorkspaceRoot() + File.sep + ".vscode");
+
+    if (!vscodeDir.IsDir()) {
+      vscodeDir.CreateDir();
+    }
+
+    return new File(vscodeDir.path + File.sep + "c_cpp_properties.json");
+  }
+
+  /**
+   * 工程配置变化后重新生成 c_cpp_properties.json：workspaceRoot 可能已被修改，
+   * 新文件要写到新的工作区目录。连续保存时合并为一次写入。
+   */
+  private scheduleCppPropertiesUpdate(): void {
+    if (this.cppPropertiesTimer !== undefined) {
+      clearTimeout(this.cppPropertiesTimer);
+    }
+
+    this.cppPropertiesTimer = setTimeout(() => {
+      this.cppPropertiesTimer = undefined;
+
+      if (this.isClosed || this.targetList.length === 0) {
+        return;
+      }
+
+      this.updateCppProperties();
+    }, 500);
+  }
+
+  /**
    * 一次性把所有 Target 的 include/define 写入
    * '.vscode/c_cpp_properties.json'。
    *
@@ -687,9 +821,7 @@ class KeilProject implements IView, KeilProjectInfo {
    * 即使内容没有变化也会让 C/C++ 插件重新加载配置。
    */
   private updateCppProperties(): void {
-    const proFile = new File(
-      this.vscodeDir.path + File.sep + "c_cpp_properties.json",
-    );
+    const proFile = this.getCppPropertiesFile();
 
     let origin: string | undefined;
     let obj: CppProperties = {
@@ -781,6 +913,11 @@ class KeilProject implements IView, KeilProjectInfo {
     if (this.uv4LogTimer !== undefined) {
       clearTimeout(this.uv4LogTimer);
       this.uv4LogTimer = undefined;
+    }
+
+    if (this.cppPropertiesTimer !== undefined) {
+      clearTimeout(this.cppPropertiesTimer);
+      this.cppPropertiesTimer = undefined;
     }
 
     this.uv4LogWatcher?.Close();
@@ -1916,13 +2053,25 @@ class ProjectExplorer
         const excludeList =
           ResourceManager.getInstance().getProjectExcludeList();
 
-        // const uvList = workspace.GetList([/\.uvproj[x]?$/i], File.EMPTY_FILTER).concat(ResourceManager.getInstance().getProjectFileLocationList())
-        //     .filter((file) => { return !excludeList.includes(file.name); });
+        // 工作区配置里登记的工程：切换工作区时由本插件写入。
+        // 静态扫描只看工作区根目录，而 MDK 工程通常放在 'Projects/xxx' 子目录里，
+        // 没有这份登记，重载之后工程列表会是空的。
+        const workspaceConfigFile = new File(
+          wsFilePath +
+            File.sep +
+            ".vscode" +
+            File.sep +
+            PROJECT_CONFIG_FILE_NAME,
+        );
+        const registeredProjects = readProjectFiles(
+          readConfigObject(workspaceConfigFile),
+        ).map((entry) => resolveProjectFile(wsFilePath, entry));
 
         const uvList: File[] = workspace
           .GetList([/\.uvproj[x]?$/i], File.EMPTY_FILTER)
           .map((file) => file.path)
           .concat(ResourceManager.getInstance().getProjectFileLocationList())
+          .concat(registeredProjects)
           .map((path) => new File(vscodeVariables(path)))
           .filter((file) => !excludeList.includes(file.name));
 
@@ -1993,6 +2142,175 @@ class ProjectExplorer
       this.prjList.delete(pID);
       this.updateView();
     }
+  }
+
+  /**
+   * 打开工程后的工作区确认流程。
+   *
+   * 工作区位置来自工程文件旁的 '.vscode/keil-assistant.json'，默认就是工程文件
+   * 所在目录；用户可以在通知里直接切换，也可以选择其它目录并把位置写回配置。
+   */
+  async promptOpenWorkspace(project: KeilProject): Promise<void> {
+    const info = project.getWorkspaceRootInfo();
+
+    if (info.invalid !== undefined) {
+      void vscode.window.showWarningMessage(
+        `Keil Assistant: workspaceRoot '${info.invalid}' is not an existing folder, using '${info.root}' instead.`,
+      );
+    }
+
+    // 工作区已经是它时不必再弹窗，否则每次打开工程都会多一次窗口重载
+    if (isWorkspaceFolderOpen(info.root)) {
+      return;
+    }
+
+    const picked = await vscode.window.showInformationMessage(
+      `Keil project loaded. Open workspace '${info.root}'? The window will be reloaded.`,
+      "Open Workspace",
+      "Change Location...",
+      "Later",
+    );
+
+    if (picked === "Open Workspace") {
+      this.openProjectWorkspace(project, info.root);
+    } else if (picked === "Change Location...") {
+      const root = await this.pickWorkspaceRoot(project);
+
+      if (root !== undefined) {
+        project.setWorkspaceRoot(root);
+        this.openProjectWorkspace(project, root);
+      }
+    }
+  }
+
+  /** 命令：为工程指定工作区根目录，写回工程配置后询问是否立即切换 */
+  async setWorkspaceRootCommand(item?: IView): Promise<void> {
+    const project = await this.pickProject(item);
+
+    if (!project) {
+      void vscode.window.showInformationMessage(
+        "Keil Assistant: open a keil project first.",
+      );
+      return;
+    }
+
+    const root = await this.pickWorkspaceRoot(project);
+
+    if (root === undefined) {
+      return;
+    }
+
+    project.setWorkspaceRoot(root);
+
+    if (isWorkspaceFolderOpen(root)) {
+      void vscode.window.showInformationMessage(
+        `Keil Assistant: workspace root saved: ${root}`,
+      );
+      return;
+    }
+
+    const picked = await vscode.window.showInformationMessage(
+      `Keil Assistant: workspace root saved: ${root}. Open it now?`,
+      "Open Workspace",
+      "Later",
+    );
+
+    if (picked === "Open Workspace") {
+      this.openProjectWorkspace(project, root);
+    }
+  }
+
+  /**
+   * 目标目录就是工程文件所在目录时，加载工作区会直接扫描到该工程；
+   * 否则先把工程登记到目标工作区的配置里，切换后重载时才能自动重新打开。
+   */
+  private openProjectWorkspace(project: KeilProject, root: string): void {
+    this.registerProjectInWorkspace(project, root);
+    openWorkspaceFolder(root);
+  }
+
+  /** 把工程文件路径写入目标工作区 '.vscode/keil-assistant.json' 的 projectFiles */
+  private registerProjectInWorkspace(project: KeilProject, root: string): void {
+    if (samePath(root, project.uvprjFile.dir)) {
+      return;
+    }
+
+    try {
+      const vscodeDir = new File(root + File.sep + ".vscode");
+
+      if (!vscodeDir.IsDir()) {
+        vscodeDir.CreateDir();
+      }
+
+      const configFile = new File(
+        vscodeDir.path + File.sep + PROJECT_CONFIG_FILE_NAME,
+      );
+      const config = readConfigObject(configFile) ?? {};
+      const entries = readProjectFiles(config);
+
+      const registered = entries.some((entry) =>
+        samePath(resolveProjectFile(root, entry), project.uvprjFile.path),
+      );
+
+      if (!registered) {
+        entries.push(toConfigPath(root, project.uvprjFile.path));
+        config[PROJECT_FILES_KEY] = entries;
+        configFile.Write(JSON.stringify(config, undefined, 4) + "\n");
+      }
+    } catch (error) {
+      // 登记失败只影响下次自动加载，不能阻止本次工作区切换
+      project.logger.log(
+        `[Warn] register project in workspace failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async pickWorkspaceRoot(
+    project: KeilProject,
+  ): Promise<string | undefined> {
+    const picked = await vscode.window.showOpenDialog({
+      openLabel: "Use as workspace root",
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      defaultUri: vscode.Uri.file(project.getWorkspaceRoot()),
+    });
+
+    return picked?.[0]?.fsPath;
+  }
+
+  /** 命令没有携带树节点时，按“当前活动工程 / 唯一工程 / 用户选择”的顺序确定工程 */
+  private async pickProject(item?: IView): Promise<KeilProject | undefined> {
+    const fromView = item ? this.prjList.get(item.prjID) : undefined;
+
+    if (fromView) {
+      return fromView;
+    }
+
+    if (this.currentActiveProject) {
+      return this.currentActiveProject;
+    }
+
+    const projects = Array.from(this.prjList.values());
+
+    if (projects.length === 1) {
+      return projects[0];
+    }
+
+    if (projects.length === 0) {
+      return undefined;
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      projects.map((project) => ({
+        label: project.label,
+        description: project.uvprjFile.path,
+        project,
+      })),
+      { placeHolder: "Select a keil project" },
+    );
+
+    return picked?.project;
   }
 
   async activeProject(view: IView) {

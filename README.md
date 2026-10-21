@@ -99,6 +99,20 @@ vscode 上的 Keil 辅助工具，与 c/c++ 插件配合使用.
   ]
   ```
 
+- 工程工作区位置：工程文件（`.uvprojx`）所在的目录下会生成 `.vscode/keil-assistant.json`，用来记录打开工程时使用的工作区根目录
+  ```json
+  {
+      "workspaceRoot": "."
+  }
+  ```
+  - `workspaceRoot` 默认为 `.`，即工程文件所在目录，与旧版本行为一致
+  - 支持相对路径（相对工程文件所在目录，例如 MDK 工程位于 `Projects/MDK-ARM` 时填 `"../.."`）和绝对路径
+  - 打开工程后，插件会提示是否切换到该工作区；也可以点击通知里的 **Change Location...**，或右键工程选择 **Keil Assistant: Set Workspace Root** 重新指定目录
+  - 切换工作区后，插件会把工程登记到目标工作区 `.vscode/keil-assistant.json` 的 `projectFiles` 中（相对路径），下次打开该工作区时自动加载工程
+  - 配置的目录不存在时会回退到工程文件所在目录，并给出提示
+
+  生成的 `c_cpp_properties.json` 会写入当前工作区根目录的 `.vscode` 下，保证 C/C++ 插件能读取到
+
 ### 还有其他问题 ？
 
 可以到以下位置进行交流
