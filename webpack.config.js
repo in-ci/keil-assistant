@@ -1,39 +1,42 @@
 //@ts-check
 
-'use strict';
+"use strict";
 
-const path = require('path');
+const path = require("path");
 
 const config = {
-    target: 'node',
-    entry: './src/extension.ts',
-    output: {
-        path: path.resolve(__dirname, 'dist'),
-        filename: 'extension.js',
-        libraryTarget: 'commonjs2',
-        devtoolModuleFilenameTemplate: '../[resource-path]'
-    },
-    devtool: 'source-map',
-    externals: {
-        vscode: 'commonjs vscode',
-        xml2js: 'xml2js'
-    },
-    resolve: {
-        // support reading TypeScript and JavaScript files, 📖 -> https://github.com/TypeStrong/ts-loader
-        extensions: ['.ts', '.js']
-    },
-    module: {
-        rules: [
-            {
-                test: /\.ts$/,
-                exclude: /node_modules/,
-                use: [
-                    {
-                        loader: 'ts-loader'
-                    }
-                ]
-            }
-        ]
-    }
+  target: "node",
+  entry: "./src/extension.ts",
+  output: {
+    path: path.resolve(__dirname, "dist"),
+    filename: "extension.js",
+    libraryTarget: "commonjs2",
+    devtoolModuleFilenameTemplate: "../[resource-path]",
+  },
+  devtool: "source-map",
+  externals: {
+    vscode: "commonjs vscode",
+    xml2js: "xml2js",
+  },
+  resolve: {
+    // support reading TypeScript and JavaScript files, 📖 -> https://github.com/TypeStrong/ts-loader
+    extensions: [".ts", ".js"],
+  },
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        exclude: /node_modules/,
+        use: [
+          {
+            loader: "esbuild-loader",
+            options: {
+              target: "es2015",
+            },
+          },
+        ],
+      },
+    ],
+  },
 };
 module.exports = config;

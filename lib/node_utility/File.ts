@@ -8,17 +8,39 @@ export class File {
   static EMPTY_FILTER: RegExp[] = [];
 
   readonly name: string; // example 'demo.cpp'
-  readonly noSuffixName: string; // example 'demo'
-  readonly suffix: string; // example '.cpp'
-  readonly dir: string; // example 'd:\\dir'
   readonly path: string; // example 'd:\\dir\\demo.cpp'
+
+  // dir / noSuffixName / suffix 采用惰性求值：
+  // 建立工程树时每个源文件（以及每次构建后每个依赖文件）都会创建一个 File 对象，
+  // 而渲染时通常只用到 name/path，dirname/extname 能省则省。
+  private _noSuffixName?: string;
+  private _suffix?: string;
+  private _dir?: string;
 
   constructor(fPath: string) {
     this.path = fPath;
     this.name = Path.basename(fPath);
-    this.noSuffixName = this.GetNoSuffixName(this.name);
-    this.suffix = Path.extname(fPath);
-    this.dir = Path.dirname(fPath);
+  }
+
+  get noSuffixName(): string {
+    if (this._noSuffixName === undefined) {
+      this._noSuffixName = this.GetNoSuffixName(this.name);
+    }
+    return this._noSuffixName;
+  }
+
+  get suffix(): string {
+    if (this._suffix === undefined) {
+      this._suffix = Path.extname(this.path);
+    }
+    return this._suffix;
+  }
+
+  get dir(): string {
+    if (this._dir === undefined) {
+      this._dir = Path.dirname(this.path);
+    }
+    return this._dir;
   }
 
   static fromArray(pathArray: string[]): File {
@@ -53,14 +75,14 @@ export class File {
     
             let path = _path;
     
-            // delete '..' of path
+            // 去掉路径中的 '..'
             let parts = path.split('/');
             let index = -1;
             while ((index = parts.indexOf('..')) > 0) {
                 parts.splice(index - 1, 2);
             }
     
-            // delete '.' of path
+            // 去掉路径中的 '.'
             path = parts.join('/').replace(/\/\.(?=\/)/g, '');
     
             return path;
@@ -93,37 +115,27 @@ export class File {
     fileFilter?: RegExp[],
     dirFilter?: RegExp[],
   ): File[] {
-    const res: File[] = [];
+    const files: File[] = [];
+    const dirs: File[] = [];
 
-    if (fileFilter) {
-      fList.forEach((f) => {
-        if (f.IsFile() && this._match(f.name, isInverter, fileFilter)) {
-          res.push(f);
+    for (const f of fList) {
+      const stats = File._stat(f.path);
+      if (stats === undefined) {
+        continue;
+      }
+
+      if (stats.isFile()) {
+        if (!fileFilter || this._match(f.name, isInverter, fileFilter)) {
+          files.push(f);
         }
-      });
-    } else {
-      fList.forEach((f) => {
-        if (f.IsFile()) {
-          res.push(f);
+      } else if (stats.isDirectory()) {
+        if (!dirFilter || this._match(f.name, isInverter, dirFilter)) {
+          dirs.push(f);
         }
-      });
+      }
     }
 
-    if (dirFilter) {
-      fList.forEach((f) => {
-        if (f.IsDir() && this._match(f.name, isInverter, dirFilter)) {
-          res.push(f);
-        }
-      });
-    } else {
-      fList.forEach((f) => {
-        if (f.IsDir()) {
-          res.push(f);
-        }
-      });
-    }
-
-    return res;
+    return files.concat(dirs);
   }
 
   static Filter(
@@ -212,47 +224,39 @@ export class File {
 
   GetList(fileFilter?: RegExp[], dirFilter?: RegExp[]): File[] {
     const list: File[] = [];
-    fs.readdirSync(this.path).forEach((str: string) => {
-      if (str !== "." && str !== "..") {
-        const f = new File(this.path + Path.sep + str);
-        if (f.IsDir()) {
-          if (dirFilter) {
-            for (const reg of dirFilter) {
-              if (reg.test(f.name)) {
-                list.push(f);
-                break;
-              }
-            }
-          } else {
-            list.push(f);
-          }
-        } else {
-          if (fileFilter) {
-            for (const reg of fileFilter) {
-              if (reg.test(f.name)) {
-                list.push(f);
-                break;
-              }
-            }
-          } else {
-            list.push(f);
-          }
-        }
+
+    for (const name of fs.readdirSync(this.path)) {
+      if (name === "." || name === "..") {
+        continue;
       }
-    });
+
+      const fullPath = this.path + Path.sep + name;
+      const stats = File._stat(fullPath);
+      const isDir = stats !== undefined && stats.isDirectory();
+      const filter = isDir ? dirFilter : fileFilter;
+
+      if (filter && !File._match(name, false, filter)) {
+        continue;
+      }
+
+      list.push(new File(fullPath));
+    }
+
     return list;
   }
 
   GetAll(fileFilter?: RegExp[], dirFilter?: RegExp[]): File[] {
     const res: File[] = [];
 
-    let fStack: File[] = this.GetList(fileFilter);
+    const fStack: File[] = this.GetList(fileFilter);
     let f: File;
 
     while (fStack.length > 0) {
       f = <File>fStack.pop();
       if (f.IsDir()) {
-        fStack = fStack.concat(f.GetList(fileFilter));
+        for (const child of f.GetList(fileFilter)) {
+          fStack.push(child);
+        }
       }
       res.push(f);
     }
@@ -300,18 +304,22 @@ export class File {
     return fs.existsSync(this.path);
   }
 
-  IsFile(): boolean {
-    if (fs.existsSync(this.path)) {
-      return fs.lstatSync(this.path).isFile();
+  private static _stat(path: string): fs.Stats | undefined {
+    try {
+      return fs.lstatSync(path);
+    } catch {
+      return undefined;
     }
-    return false;
+  }
+
+  IsFile(): boolean {
+    const stats = File._stat(this.path);
+    return stats !== undefined && stats.isFile();
   }
 
   IsDir(): boolean {
-    if (fs.existsSync(this.path)) {
-      return fs.lstatSync(this.path).isDirectory();
-    }
-    return false;
+    const stats = File._stat(this.path);
+    return stats !== undefined && stats.isDirectory();
   }
 
   getHash(hashName?: string): string {
