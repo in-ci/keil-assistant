@@ -181,7 +181,6 @@
         },
         {
           "command": "project.buildAndDownload",
-          "group": "inline",
           "when": "viewItem == Target"
         },
         {

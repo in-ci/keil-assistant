@@ -457,6 +457,7 @@ class KeilProject implements IView, KeilProjectInfo {
   label: string;
   tooltip?: string | undefined;
   contextVal?: string | undefined = "Project";
+  // 工程节点图标：浅色窗口轮廓（与源码文件图标同一套调色板），活动工程额外用暖橙标题栏区分
   icons?: { light: string; dark: string } = getIconPair(
     "DeactiveApplication_16x",
   );
@@ -805,10 +806,12 @@ class KeilProject implements IView, KeilProjectInfo {
     return node_path.normalize(this.uvprjFile.dir + File.sep + path);
   }
 
+  // 当前工程使用带暖橙标题栏的窗口图标，与 Target 的橙色方块呼应
   active() {
-    this.icons = getIconPair("ActiveApplication_16x");
+    this.icons = getIconPair("ProjectActive_16x");
   }
 
+  // 非当前工程使用灰白窗口图标，弱化但不隐形
   deactive() {
     this.icons = getIconPair("DeactiveApplication_16x");
   }
