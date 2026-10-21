@@ -499,6 +499,13 @@ export class ProjectExplorer
   }
 
   /**
+   * 获取当前活动的工程对象。
+   */
+  getActiveProject(): KeilProject | undefined {
+    return this.currentActiveProject;
+  }
+
+  /**
    * 获取指定树节点的子级视图列表。
    * - element 为 undefined 时，返回工作区根级工程列表；
    * - 否则调用节点的 getChildViews() 获取下级节点。

@@ -467,6 +467,29 @@ export abstract class Target implements IView {
     return true;
   }
 
+  /**
+   * 获取当前 Target 下所有参与编译的源文件绝对路径列表（.c, .cpp, .cxx, .cc 等）。
+   * 仅包含所在 Group 未被排除且文件本身未被排除的源码文件。
+   */
+  getCompileSourceFiles(): string[] {
+    const result: string[] = [];
+    const sourceSuffixes = new Set([".c", ".cpp", ".cxx", ".cc", ".c++"]);
+
+    for (const group of this.fGroups) {
+      for (const source of group.sources) {
+        if (!source.enable) {
+          continue;
+        }
+        const ext = node_path.extname(source.file.path).toLowerCase();
+        if (sourceSuffixes.has(ext)) {
+          result.push(source.file.path);
+        }
+      }
+    }
+
+    return result;
+  }
+
   /** 检查工程 XML 节点结构是否符合当前目标要求 */
   protected abstract checkProject(target: XmlNode): Error | undefined;
 

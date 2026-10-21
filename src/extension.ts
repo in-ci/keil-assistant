@@ -20,6 +20,10 @@ export {
   generateClangdContent,
   isClangdIncompatibleDefine,
 } from "./services/clangdConfigWriter";
+export {
+  writeCompileCommands,
+  generateCompileCommands,
+} from "./services/compileCommandsWriter";
 export { File } from "../lib/node_utility/File";
 export { ArmTarget } from "./model/armTarget";
 

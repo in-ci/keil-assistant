@@ -132,6 +132,7 @@ export function generateClangdContent(
     "# 用于 clangd 语言服务提供高效的代码补全、定义跳转与诊断分析",
     `# 关联目标: ${config.name}`,
     "CompileFlags:",
+    '  CompilationDatabase: "."',
     "  Add:",
   ];
 
@@ -139,6 +140,26 @@ export function generateClangdContent(
     // 使用 JSON.stringify 保证 YAML 双引号字符串标量的正确转义
     lines.push(`    - ${JSON.stringify(flag)}`);
   }
+
+  // 针对第三方 SDK / 厂商固件库目录（如 Librarys/、Drivers/、CMSIS/、Middlewares/ 等）
+  // 以及各芯片平台的硬件外设配置文件（如 stm32h7xx_hal_conf.h 等）配置诊断抑制，
+  // 避免各厂商官方库历史遗留的头文件循环引用缺陷干扰开发者。用户业务代码依然保持完整语法检查与诊断。
+  lines.push("---");
+  lines.push("# 抑制第三方 SDK、厂商固件库及硬件外设配置文件中的非关键诊断噪音，保持编辑器清爽");
+  lines.push("If:");
+  lines.push("  PathMatch:");
+  lines.push(
+    "    - '.*/(Librarys|Drivers|Middlewares|CMSIS|Libraries|third_party|sdk)/.*'",
+  );
+  lines.push(
+    "    - '(Librarys|Drivers|Middlewares|CMSIS|Libraries|third_party|sdk)/.*'",
+  );
+  lines.push("    - '.*_hal_conf\\.h$'");
+  lines.push("    - '.*_conf\\.h$'");
+  lines.push("    - '.*Config\\.h$'");
+  lines.push("Diagnostics:");
+  lines.push("  Suppress:");
+  lines.push("    - '*'");
 
   return lines.join("\n") + "\n";
 }

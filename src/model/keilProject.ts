@@ -22,6 +22,7 @@ import {
 } from "../common/xml";
 import { writeCppProperties } from "../services/cppPropertiesWriter";
 import { writeClangdConfig } from "../services/clangdConfigWriter";
+import { writeCompileCommands } from "../services/compileCommandsWriter";
 import type { KeilProjectInfo, uVisonInfo } from "./projectInfo";
 import { createTarget } from "./targetFactory";
 import type { Target } from "./target";
@@ -397,6 +398,21 @@ export class KeilProject implements IView, KeilProjectInfo {
       this.getWorkspaceRoot(),
       configs,
       this.activeTargetName,
+      this.logger,
+    );
+
+    // 写入/更新工作区根目录下的 compile_commands.json（.vscode 同级目录）
+    // 供 clangd 建立工程全局符号索引，支持跨文件快速“跳转到函数实现”
+    const activeTarget =
+      this.targetList.find((t) => t.targetName === this.activeTargetName) ??
+      this.targetList[0];
+    const activeConfig =
+      configs.find((c) => c.name === this.activeTargetName) ?? configs[0];
+
+    writeCompileCommands(
+      this.getWorkspaceRoot(),
+      activeConfig,
+      activeTarget.getCompileSourceFiles(),
       this.logger,
     );
   }
