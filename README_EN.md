@@ -109,6 +109,8 @@ It provides syntax highlighting, code snippets for Keil projects, and supports c
 
   The generated `c_cpp_properties.json` is written to the `.vscode` folder of the current workspace root so that the C/C++ extension can pick it up
 
+  Run-time files (`keil-assistant.log`, `uv4.log`, `uv4.log.lock`) are written to the same workspace `.vscode` folder; reopen the project after changing `workspaceRoot` (the log file of the current window is not moved)
+
 ### Any other questions ?
 
 You can go to the following places to communicate

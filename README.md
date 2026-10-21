@@ -113,6 +113,8 @@ vscode 上的 Keil 辅助工具，与 c/c++ 插件配合使用.
 
   生成的 `c_cpp_properties.json` 会写入当前工作区根目录的 `.vscode` 下，保证 C/C++ 插件能读取到
 
+  插件的运行期文件（`keil-assistant.log`、`uv4.log`、`uv4.log.lock`）同样写入当前工作区根目录的 `.vscode` 下；修改 `workspaceRoot` 后重新打开工程即可生效（当前窗口的日志文件不会中途搬移）
+
 ### 还有其他问题 ？
 
 可以到以下位置进行交流

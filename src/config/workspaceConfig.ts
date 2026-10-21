@@ -1,6 +1,6 @@
 import * as node_path from "path";
 
-import { File } from "../lib/node_utility/File";
+import { File } from "../../lib/node_utility/File";
 
 /**
  * 工程配置 / 工作区配置共用的文件名，统一放在 `.vscode` 目录下。
@@ -130,4 +130,51 @@ export function resolveProjectFile(workspaceRoot: string, entry: string): string
   }
 
   return node_path.resolve(workspaceRoot, entry);
+}
+
+/** 把工程登记到目标工作区的配置里，返回是否真的写入了文件 */
+export function registerProjectInWorkspaceConfig(
+  workspaceRoot: string,
+  uvprjFile: File,
+  log: (message: string) => void,
+): boolean {
+  // 目标目录就是工程目录时，加载工作区会直接扫描到该工程，无需登记
+  if (samePath(workspaceRoot, uvprjFile.dir)) {
+    return false;
+  }
+
+  try {
+    const vscodeDir = new File(workspaceRoot + File.sep + ".vscode");
+
+    if (!vscodeDir.IsDir()) {
+      vscodeDir.CreateDir();
+    }
+
+    const configFile = new File(
+      vscodeDir.path + File.sep + PROJECT_CONFIG_FILE_NAME,
+    );
+    const config = readConfigObject(configFile) ?? {};
+    const entries = readProjectFiles(config);
+
+    // 已经登记过（可能写的是相对路径）就不再重复追加
+    const registered = entries.some((entry) =>
+      samePath(resolveProjectFile(workspaceRoot, entry), uvprjFile.path),
+    );
+
+    if (registered) {
+      return false;
+    }
+
+    entries.push(toConfigPath(workspaceRoot, uvprjFile.path));
+    config[PROJECT_FILES_KEY] = entries;
+    configFile.Write(JSON.stringify(config, undefined, 4) + "\n");
+
+    return true;
+  } catch (error: unknown) {
+    // 登记失败只影响“切换工作区后自动重开工程”，不应阻止用户切换
+    log(
+      `[Warn] register project to workspace failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
 }
