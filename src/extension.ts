@@ -24,6 +24,12 @@ export {
   writeCompileCommands,
   generateCompileCommands,
 } from "./services/compileCommandsWriter";
+export {
+  writeVscodeSettings,
+  generateVscodeSettingsContent,
+  DEFAULT_VSCODE_SETTINGS,
+  VSCODE_SETTINGS_FILE_NAME,
+} from "./services/vscodeSettingsWriter";
 export { File } from "../lib/node_utility/File";
 export { ArmTarget } from "./model/armTarget";
 

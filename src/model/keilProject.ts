@@ -23,6 +23,7 @@ import {
 import { writeCppProperties } from "../services/cppPropertiesWriter";
 import { writeClangdConfig } from "../services/clangdConfigWriter";
 import { writeCompileCommands } from "../services/compileCommandsWriter";
+import { writeVscodeSettings } from "../services/vscodeSettingsWriter";
 import type { KeilProjectInfo, uVisonInfo } from "./projectInfo";
 import { createTarget } from "./targetFactory";
 import type { Target } from "./target";
@@ -415,6 +416,9 @@ export class KeilProject implements IView, KeilProjectInfo {
       activeTarget.getCompileSourceFiles(),
       this.logger,
     );
+
+    // 首次打开工程时生成 .vscode/settings.json 减轻编辑器搜索与文件监控负担（若已存在则直接跳过）
+    writeVscodeSettings(this.getWorkspaceRoot(), this.logger);
   }
 
   notifyUpdateView() {
