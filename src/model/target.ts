@@ -467,19 +467,31 @@ export abstract class Target implements IView {
     return true;
   }
 
+  /** 检查工程 XML 节点结构是否符合当前目标要求 */
   protected abstract checkProject(target: XmlNode): Error | undefined;
 
+  /** 获取头文件搜索路径原始字符串 */
   protected abstract getIncString(target: XmlNode): string;
+  /** 获取预编译宏定义原始字符串 */
   protected abstract getDefineString(target: XmlNode): string;
+  /** 获取工具链内置系统宏定义列表 */
   protected abstract getSysDefines(target: XmlNode): string[];
+  /** 获取分组节点列表 */
   protected abstract getGroups(target: XmlNode): XmlNode[];
+  /** 获取系统内置标准库头文件目录 */
   protected abstract getSystemIncludes(target: XmlNode): string[] | undefined;
 
+  /** 获取构建输出中间产物目录（.d 文件所在目录） */
   protected abstract getOutputFolder(target: XmlNode): string | undefined;
+  /** 解析 .d 文件中的头文件依赖行 */
   protected abstract parseRefLines(target: XmlNode, lines: string[]): string[];
 
+  /** 获取 VS Code Task 使用的问题匹配器 ID */
   protected abstract getProblemMatcher(): string[];
+  /** 获取增量编译构建参数 */
   protected abstract getBuildCommand(): string[];
+  /** 获取全部重新构建参数 */
   protected abstract getRebuildCommand(): string[];
+  /** 获取烧录下载参数 */
   protected abstract getDownloadCommand(): string[];
 }

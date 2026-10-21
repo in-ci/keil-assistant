@@ -15,6 +15,11 @@ export {
 } from "./config/workspaceConfig";
 export { ProjectConfig } from "./config/projectConfig";
 export { writeCppProperties } from "./services/cppPropertiesWriter";
+export {
+  writeClangdConfig,
+  generateClangdContent,
+  isClangdIncompatibleDefine,
+} from "./services/clangdConfigWriter";
 export { File } from "../lib/node_utility/File";
 export { ArmTarget } from "./model/armTarget";
 

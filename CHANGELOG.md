@@ -5,6 +5,8 @@ All notable changes to the "keil-assistant" extension will be documented in this
 ## [Unreleased]
 - New: remember the workspace root of each project in `.vscode/keil-assistant.json` (default: the project folder)
 - New: `Keil Assistant: Set Workspace Root` command and a "Change Location..." button to pick another workspace root
+- New: generate `.clangd` configuration file at workspace root (same level as `.vscode`) based on `c_cpp_properties.json` for lightweight code navigation and diagnostics with clangd
+- New: automatically sync and update `.clangd` compilation flags when switching active targets
 - Optimize: generated `c_cpp_properties.json` follows the workspace root
 - Optimize: run-time files (`keil-assistant.log`, `uv4.log`, `uv4.log.lock`) follow the workspace root too
 - Optimize: split `extension.ts` into focused modules (common/model/services/explorer) and dedupe config/file-watching code
@@ -15,6 +17,7 @@ All notable changes to the "keil-assistant" extension will be documented in this
 - Optimize: cache `{ light, dark }` URI icon pairs in `ResourceManager` to eliminate allocations in tree rendering
 - Optimize: normalize CRLF in `writeCppProperties` to prevent unnecessary re-writes and C/C++ re-indexing on Windows
 - Optimize: fast `noSuffixName` implementation using `lastIndexOf` instead of array allocation
+- Docs: add detailed Chinese docstrings and comments across modules and functions
 ***
 
 ## [v1.7.1]

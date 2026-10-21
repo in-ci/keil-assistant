@@ -2,7 +2,12 @@ import { File } from "./File";
 import * as fs from "fs";
 import * as events from "events";
 
+/**
+ * 文件与目录系统变动监视器。
+ * 封装 Node 原生 `fs.watch`，提供重命名、内容变更回调与安全错误冒泡。
+ */
 export class FileWatcher {
+  /** 监视的目标文件或目录对象 */
   readonly file: File;
   private watcher?: fs.FSWatcher;
   private selfWatcher?: fs.FSWatcher;
@@ -10,9 +15,17 @@ export class FileWatcher {
   private recursive: boolean;
   private _event: events.EventEmitter;
 
+  /** 文件/目录发生重命名或同名增删时的事件回调 */
   OnRename?: (file: File) => void;
+  /** 文件内容发生变更时的事件回调 */
   OnChanged?: (file: File) => void;
 
+  /**
+   * 构造文件监视器。
+   *
+   * @param _file 目标 File 实例
+   * @param _recursive 是否递归监视子目录（仅对目录有效）
+   */
   constructor(_file: File, _recursive: boolean = false) {
     this.file = _file;
     this.recursive = _recursive;
@@ -20,6 +33,9 @@ export class FileWatcher {
     this._event = new events.EventEmitter();
   }
 
+  /**
+   * 注册错误监听器。
+   */
   on(event: "error", listener: (err: Error) => void): this {
     this._event.on(event, listener);
     return this;
@@ -36,6 +52,10 @@ export class FileWatcher {
     }
   }
 
+  /**
+   * 启动文件或目录监视。
+   * 目录监视时，同时对其父级目录挂载 selfWatcher 以感知目录本身被重命名。
+   */
   Watch(): this {
     if (this.isDir && this.selfWatcher === undefined) {
       this.selfWatcher = fs.watch(
@@ -99,6 +119,9 @@ export class FileWatcher {
     return this;
   }
 
+  /**
+   * 关闭并注销所有底层文件监视句柄。
+   */
   Close() {
     if (this.selfWatcher) {
       this.selfWatcher.close();

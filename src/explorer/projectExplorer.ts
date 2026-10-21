@@ -323,6 +323,9 @@ export class ProjectExplorer
     return picked?.project;
   }
 
+  /**
+   * 将选中的工程节点设置为当前活动工程，刷新对应的高亮图标。
+   */
   async activeProject(view: IView) {
     const project = this.prjList.get(view.prjID);
     if (project) {
@@ -333,6 +336,10 @@ export class ProjectExplorer
     }
   }
 
+  /**
+   * 弹出下拉框供用户切换当前工程的 Target（构建目标）。
+   * 切换后将同步更新工程树、c_cpp_properties.json 以及 .clangd 编译选项。
+   */
   async switchTargetByProject(view: IView) {
     const prj = this.prjList.get(view.prjID);
     if (prj) {
@@ -352,6 +359,11 @@ export class ProjectExplorer
     }
   }
 
+  /**
+   * 获取指定的构建目标 Target 实例。
+   * - 若传入树节点 view，则获取该节点对应的 Target；
+   * - 若未传入 view，则默认获取当前活动工程的活动 Target。
+   */
   getTarget(view?: IView): Target | undefined {
     if (view) {
       const prj = this.prjList.get(view.prjID);
@@ -452,6 +464,9 @@ export class ProjectExplorer
     }
   }
 
+  /**
+   * 将内部视图模型 IView 转换为 VS Code 侧边栏 TreeItem 渲染对象。
+   */
   getTreeItem(element: IView): vscode.TreeItem | Thenable<vscode.TreeItem> {
     const res = new vscode.TreeItem(element.label);
 
@@ -483,6 +498,11 @@ export class ProjectExplorer
     return res;
   }
 
+  /**
+   * 获取指定树节点的子级视图列表。
+   * - element 为 undefined 时，返回工作区根级工程列表；
+   * - 否则调用节点的 getChildViews() 获取下级节点。
+   */
   getChildren(element?: IView): vscode.ProviderResult<IView[]> {
     if (element === undefined) {
       return Array.from(this.prjList.values());

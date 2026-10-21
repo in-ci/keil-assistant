@@ -1,7 +1,9 @@
 let instance: Time;
 
-//Format Example: 2019/9/22|10:12:23|GMT...
-
+/**
+ * 时间分解信息接口。
+ * 格式示例：2026/10/21|10:12:23|GMT+0800
+ */
 export interface TimeInfo {
   year: number;
   month: number;
@@ -14,6 +16,9 @@ export interface TimeInfo {
   region: string;
 }
 
+/**
+ * 时间日期格式化与解析工具类（单例模式）。
+ */
 export class Time {
   private date: Date;
   private Separater: string;
@@ -23,6 +28,9 @@ export class Time {
     this.Separater = "|";
   }
 
+  /**
+   * 获取 Time 单例对象。
+   */
   static GetInstance(): Time {
     if (instance) {
       return instance;
@@ -31,6 +39,10 @@ export class Time {
     return instance;
   }
 
+  /**
+   * 获取当前时刻的时间戳字符串。
+   * 格式: `YYYY/MM/DD|HH:MM:SS|GMT...`
+   */
   GetTimeStamp(): string {
     this.date.setTime(Date.now());
     let dateStr = this.GetDateString();
@@ -39,6 +51,9 @@ export class Time {
     return dateStr;
   }
 
+  /**
+   * 获取当前年月日字符串（如 2026/10/21）。
+   */
   private GetDateString(): string {
     return (
       this.date.getFullYear().toString() +
@@ -49,6 +64,9 @@ export class Time {
     );
   }
 
+  /**
+   * 获取当前时间结构化数据对象。
+   */
   GetTimeInfo(): TimeInfo {
     this.date.setTime(Date.now());
 
@@ -65,6 +83,9 @@ export class Time {
     };
   }
 
+  /**
+   * 解析形如 `YYYY/MM/DD|HH:MM:SS|Region` 的时间戳为结构体。
+   */
   Parse(timeStamp: string): TimeInfo {
     const fieldList = timeStamp.split("|");
     const yearField = fieldList[0].split("/");
@@ -83,6 +104,9 @@ export class Time {
     };
   }
 
+  /**
+   * 将结构体序列化为时间字符串。
+   */
   Stringify(timeData: TimeInfo): string {
     return (
       timeData.year.toString() +
@@ -101,10 +125,16 @@ export class Time {
     );
   }
 
+  /**
+   * 设置字段分隔符（默认为 "|"）。
+   */
   SetTimeSeparater(sep: string) {
     this.Separater = sep;
   }
 
+  /**
+   * 获取当前使用的时间字段分隔符。
+   */
   GetTimeSeparater(): string {
     return this.Separater;
   }

@@ -21,6 +21,7 @@ import {
   getXmlText,
 } from "../common/xml";
 import { writeCppProperties } from "../services/cppPropertiesWriter";
+import { writeClangdConfig } from "../services/clangdConfigWriter";
 import type { KeilProjectInfo, uVisonInfo } from "./projectInfo";
 import { createTarget } from "./targetFactory";
 import type { Target } from "./target";
@@ -369,19 +370,33 @@ export class KeilProject implements IView, KeilProjectInfo {
 
   /**
    * 一次性把所有 Target 的 include/define 写入工作区的
-   * '.vscode/c_cpp_properties.json'。
+   * '.vscode/c_cpp_properties.json'，并依据其内容在 .vscode 同级目录生成 '.clangd'。
    *
-   * 以前是每个 Target 都读取、解析、重写同一个文件，而且无条件写回，
-   * 即使内容没有变化也会让 C/C++ 插件重新加载配置。
+   * 1. 供微软 C/C++ 插件使用的 c_cpp_properties.json 放在 .vscode 目录下；
+   * 2. 供更轻量的 clangd 插件使用的 .clangd 放在 .vscode 同级（工作区根目录）；
+   * 3. 内容没有变化时不写盘，避免两款插件频繁重载与重构索引。
    */
   private updateCppProperties(): void {
     if (this.isClosed || this.targetList.length === 0) {
       return;
     }
 
+    const configs = this.targetList.map((target) =>
+      target.getCppPropertiesConfig(),
+    );
+
+    // 写入/更新 .vscode/c_cpp_properties.json
     writeCppProperties(
       this.getRuntimePaths().cppPropertiesFile,
-      this.targetList.map((target) => target.getCppPropertiesConfig()),
+      configs,
+      this.logger,
+    );
+
+    // 写入/更新工作区根目录下的 .clangd 文件（.vscode 同级目录）
+    writeClangdConfig(
+      this.getWorkspaceRoot(),
+      configs,
+      this.activeTargetName,
       this.logger,
     );
   }
@@ -484,6 +499,8 @@ export class KeilProject implements IView, KeilProjectInfo {
   setActiveTarget(tName: string) {
     if (tName !== this.activeTargetName) {
       this.activeTargetName = tName;
+      // 切换活动目标时同步更新 .clangd 关联的编译选项
+      this.updateCppProperties();
       this.notifyUpdateView(); // notify data changed
     }
   }

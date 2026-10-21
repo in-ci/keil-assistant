@@ -43,23 +43,37 @@ export class File {
     return this._dir;
   }
 
+  /**
+   * 将路径片段数组拼接为 File 实例。
+   */
   static fromArray(pathArray: string[]): File {
     return new File(pathArray.join(File.sep));
   }
 
+  /**
+   * 将路径统一转换为 Unix 正斜杠风格。
+   */
   static ToUnixPath(path: string): string {
     return Path.normalize(path).replace(/\\{1,}/g, "/");
   }
 
+  /**
+   * 将文件路径转换为带 file:// 协议头的 URI 字符串。
+   */
   static ToUri(path: string): string {
     return "file://" + this.ToNoProtocolUri(path);
   }
 
+  /**
+   * 将文件路径转换为 URI 编码字符串（不含协议头）。
+   */
   static ToNoProtocolUri(path: string): string {
     return "/" + encodeURIComponent(path.replace(/\\/g, "/"));
   }
 
-  // c:/abcd/../a -> c:\abcd\..\a
+  /**
+   * 转换为当前操作系统本地风格路径（如 Windows 下使用反斜杠）。
+   */
   static ToLocalPath(path: string): string {
     const res = File.ToUnixPath(path);
 
@@ -302,18 +316,36 @@ export class File {
 
   //-------------------------------------------------
 
+  /**
+   * 同步读取文件文本内容。
+   *
+   * @param encoding 编码格式，默认为 "utf8"
+   * @returns 文件字符串内容
+   */
   Read(encoding: BufferEncoding = "utf8"): string {
     return fs.readFileSync(this.path, encoding);
   }
 
+  /**
+   * 同步向文件写入文本内容。
+   *
+   * @param str 待写入的字符串
+   * @param options 文件写入配置选项
+   */
   Write(str: string, options?: fs.WriteFileOptions) {
     fs.writeFileSync(this.path, str, options);
   }
 
+  /**
+   * 检查该文件或目录在文件系统中是否存在。
+   */
   IsExist(): boolean {
     return fs.existsSync(this.path);
   }
 
+  /**
+   * 安全获取文件元数据（Stats），发生错误或路径不存在时返回 undefined。
+   */
   private static _stat(path: string): fs.Stats | undefined {
     try {
       return fs.lstatSync(path);
@@ -322,30 +354,48 @@ export class File {
     }
   }
 
+  /**
+   * 检查当前路径是否为一个常规文件。
+   */
   IsFile(): boolean {
     const stats = File._stat(this.path);
     return stats !== undefined && stats.isFile();
   }
 
+  /**
+   * 检查当前路径是否为一个目录。
+   */
   IsDir(): boolean {
     const stats = File._stat(this.path);
     return stats !== undefined && stats.isDirectory();
   }
 
+  /**
+   * 计算文件的哈希摘要（默认使用 MD5）。
+   */
   getHash(hashName?: string): string {
     const hash = crypto.createHash(hashName || "md5");
     hash.update(fs.readFileSync(this.path));
     return hash.digest("hex");
   }
 
+  /**
+   * 获取文件字节大小。
+   */
   getSize(): number {
     return fs.statSync(this.path).size;
   }
 
+  /**
+   * 生成以 file:// 开头的协议 URI 字符串。
+   */
   ToUri(): string {
     return "file://" + this.ToNoProtocolUri();
   }
 
+  /**
+   * 生成无协议头的 URI 编码路径字符串。
+   */
   ToNoProtocolUri(): string {
     return "/" + encodeURIComponent(this.path.replace(/\\/g, "/"));
   }
