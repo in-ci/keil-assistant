@@ -17,7 +17,7 @@
   ],
   "homepage": "https://github.com/github0null/keil-assistant",
   "engines": {
-    "vscode": "^1.38.0"
+    "vscode": "^1.85.0"
   },
   "categories": [
     "Programming Languages",
@@ -314,15 +314,17 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --type-aware src lib",
     "check": "pnpm run typecheck && pnpm run lint",
-    "test": "pnpm run vscode:prepublish && vscode-test"
+    "test": "pnpm run vscode:prepublish && vscode-test",
+    "package": "pnpm run check && vsce package --no-dependencies --allow-star-activation"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^24.19.2",
-    "@types/vscode": "1.140.0",
+    "@types/vscode": "~1.85.0",
     "@types/xml2js": "^0.4.14",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
     "esbuild-loader": "^4.5.0",
     "glob": "^13.0.6",
     "mocha": "^12.0.3",

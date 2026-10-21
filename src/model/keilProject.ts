@@ -6,13 +6,12 @@ import * as node_path from "path";
 
 import { File } from "../../lib/node_utility/File";
 import { FileWatcher } from "../../lib/node_utility/FileWatcher";
-import { Time } from "../../lib/node_utility/Time";
 import { ProjectConfig } from "../config/projectConfig";
 import type { RuntimePaths } from "../config/projectConfig";
 import type { WorkspaceRootInfo } from "../config/workspaceConfig";
 import { RUNTIME_LOCK_FILE_NAME } from "../config/projectConfig";
 import { Debouncer } from "../common/debounce";
-import { getMD5, isKeilTaskRunning } from "../common/util";
+import { formatTimestamp, getMD5, isKeilTaskRunning } from "../common/util";
 import { IView, getIconPair } from "../common/tree";
 import {
   getXmlNode,
@@ -58,7 +57,6 @@ export class KeilProject implements IView, KeilProjectInfo {
   uVsionFileInfo: uVisonInfo;
 
   private activeTargetName: string | undefined;
-  private prevUpdateTime: number | undefined;
 
   /** 防止工程文件被连续保存时并发重载 */
   private isReloading = false;
@@ -78,6 +76,9 @@ export class KeilProject implements IView, KeilProjectInfo {
 
   /** 工程配置文件监视器：workspaceRoot 修改后切换运行期目录 */
   private configWatcher?: FileWatcher;
+
+  /** 工程文件保存重载的防抖器 */
+  private readonly reloadDebouncer: Debouncer;
 
   /** 依赖列表刷新的防抖器 */
   private readonly sourceRefsDebouncer: Debouncer;
@@ -116,9 +117,7 @@ export class KeilProject implements IView, KeilProjectInfo {
     });
     this.logger = new console.Console(this.logStream);
 
-    this.logger.log(
-      "[info] Log at : " + Time.GetInstance().GetTimeStamp() + "\r\n",
-    );
+    this.logger.log("[info] Log at : " + formatTimestamp() + "\r\n");
 
     if (configState.created) {
       this.logger.log(
@@ -130,6 +129,9 @@ export class KeilProject implements IView, KeilProjectInfo {
       );
     }
 
+    this.reloadDebouncer = new Debouncer(300, () => {
+      void this.onReload();
+    });
     this.sourceRefsDebouncer = new Debouncer(500, () => {
       this.refreshSourceRefs();
     });
@@ -150,14 +152,7 @@ export class KeilProject implements IView, KeilProjectInfo {
     if (this.isClosed) {
       return;
     }
-
-    if (
-      this.prevUpdateTime === undefined ||
-      this.prevUpdateTime + 2000 < Date.now()
-    ) {
-      this.prevUpdateTime = Date.now();
-      setTimeout(() => this.onReload(), 300);
-    }
+    this.reloadDebouncer.schedule();
   }
 
   /**
@@ -461,6 +456,7 @@ export class KeilProject implements IView, KeilProjectInfo {
 
     this.sourceRefsDebouncer.cancel();
     this.cppPropertiesDebouncer.cancel();
+    this.reloadDebouncer.cancel();
 
     this.configWatcher?.Close();
     this.configWatcher = undefined;
@@ -487,7 +483,7 @@ export class KeilProject implements IView, KeilProjectInfo {
     }
 
     const path = rePath.replace(/\//g, File.sep);
-    if (/^[a-z]:/i.test(path)) {
+    if (node_path.isAbsolute(path)) {
       resolved = node_path.normalize(path);
     } else {
       resolved = node_path.normalize(this.uvprjFile.dir + File.sep + path);

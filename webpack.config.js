@@ -16,7 +16,6 @@ const config = {
   devtool: "source-map",
   externals: {
     vscode: "commonjs vscode",
-    xml2js: "xml2js",
   },
   resolve: {
     // support reading TypeScript and JavaScript files, 📖 -> https://github.com/TypeStrong/ts-loader

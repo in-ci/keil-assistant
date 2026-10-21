@@ -5,6 +5,7 @@ import * as node_path from "path";
 
 import { File } from "../../lib/node_utility/File";
 import { ResourceManager } from "../ResourceManager";
+import { CmdLineHandler } from "../common/cmdLineHandler";
 import { IView, getIconPair } from "../common/tree";
 import {
   XmlNode,
@@ -209,10 +210,6 @@ export abstract class Target implements IView {
     await this.updateSourceRefs();
   }
 
-  private quoteString(str: string, quote: string = '"'): string {
-    return str.includes(" ") ? quote + str + quote : str;
-  }
-
   private runTask(
     name: string,
     commands: string[],
@@ -235,17 +232,7 @@ export abstract class Target implements IView {
     args.push("-o", this.project.getRuntimePaths().uv4LogFile.path);
     args = args.concat(commands);
 
-    const isCmd = /cmd.exe$/i.test(vscode.env.shell);
-    const quote = isCmd ? '"' : "'";
-    const invokePrefix = isCmd ? "" : "& ";
-    const cmdPrefixSuffix = isCmd ? '"' : "";
-
-    let commandLine = invokePrefix + this.quoteString(builderExe, quote) + " ";
-    commandLine += args
-      .map((arg) => {
-        return this.quoteString(arg, quote);
-      })
-      .join(" ");
+    const commandLine = CmdLineHandler.getCommandLine(builderExe, args);
 
     // 有工作区时用任务运行
     if (
@@ -258,9 +245,7 @@ export abstract class Target implements IView {
         name,
         "shell",
       );
-      task.execution = new vscode.ShellExecution(
-        cmdPrefixSuffix + commandLine + cmdPrefixSuffix,
-      );
+      task.execution = new vscode.ShellExecution(commandLine);
       task.isBackground = false;
       task.problemMatchers = this.getProblemMatcher();
       task.presentationOptions = {

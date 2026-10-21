@@ -57,64 +57,72 @@ export class FileWatcher {
    * 目录监视时，同时对其父级目录挂载 selfWatcher 以感知目录本身被重命名。
    */
   Watch(): this {
-    if (this.isDir && this.selfWatcher === undefined) {
-      this.selfWatcher = fs.watch(
-        this.file.dir,
-        { recursive: false },
-        (event, fname) => {
-          if (
-            event === "rename" &&
-            fname?.toString() === this.file.name &&
-            this.OnRename
-          ) {
-            this.OnRename(this.file);
-          }
-        },
-      );
-      this.selfWatcher.on("error", (err) => {
-        this.emitError(err);
-      });
-    }
-
-    if (this.watcher === undefined) {
-      this.watcher = fs.watch(
-        this.file.path,
-        { recursive: this.recursive },
-        (event, filename) => {
-          switch (event) {
-            case "rename":
-              if (this.OnRename) {
-                if (this.isDir) {
-                  if (filename !== null && filename !== undefined) {
-                    this.OnRename(
-                      File.fromArray([this.file.path, filename.toString()]),
-                    );
-                  }
-                } else {
-                  this.OnRename(this.file);
-                }
+    try {
+      if (this.isDir && this.selfWatcher === undefined) {
+        if (fs.existsSync(this.file.dir)) {
+          this.selfWatcher = fs.watch(
+            this.file.dir,
+            { recursive: false },
+            (event, fname) => {
+              if (
+                event === "rename" &&
+                fname?.toString() === this.file.name &&
+                this.OnRename
+              ) {
+                this.OnRename(this.file);
               }
-              break;
+            },
+          );
+          this.selfWatcher.on("error", (err) => {
+            this.emitError(err);
+          });
+        }
+      }
 
-            case "change":
-              if (this.OnChanged) {
-                if (this.isDir) {
-                  if (filename !== null && filename !== undefined) {
-                    this.OnChanged(
-                      File.fromArray([this.file.path, filename.toString()]),
-                    );
+      if (this.watcher === undefined) {
+        if (fs.existsSync(this.file.path)) {
+          this.watcher = fs.watch(
+            this.file.path,
+            { recursive: this.recursive },
+            (event, filename) => {
+              switch (event) {
+                case "rename":
+                  if (this.OnRename) {
+                    if (this.isDir) {
+                      if (filename !== null && filename !== undefined) {
+                        this.OnRename(
+                          File.fromArray([this.file.path, filename.toString()]),
+                        );
+                      }
+                    } else {
+                      this.OnRename(this.file);
+                    }
                   }
-                } else {
-                  this.OnChanged(this.file);
-                }
+                  break;
+
+                case "change":
+                  if (this.OnChanged) {
+                    if (this.isDir) {
+                      if (filename !== null && filename !== undefined) {
+                        this.OnChanged(
+                          File.fromArray([this.file.path, filename.toString()]),
+                        );
+                      }
+                    } else {
+                      this.OnChanged(this.file);
+                    }
+                  }
+                  break;
               }
-              break;
-          }
-        },
-      );
-      this.watcher.on("error", (err) => {
-        this.emitError(err);
-      });
+            },
+          );
+          this.watcher.on("error", (err) => {
+            this.emitError(err);
+          });
+        }
+      }
+    } catch (err) {
+      this.emitError(err);
     }
     return this;
   }

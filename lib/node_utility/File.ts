@@ -83,25 +83,7 @@ export class File {
 
     return res;
   }
-  /* 
-        // ./././aaaa/././././bbbb => ./aaaa/bbbb
-        private static DelRepeatedPath(_path: string) {
-    
-            let path = _path;
-    
-            // 去掉路径中的 '..'
-            let parts = path.split('/');
-            let index = -1;
-            while ((index = parts.indexOf('..')) > 0) {
-                parts.splice(index - 1, 2);
-            }
-    
-            // 去掉路径中的 '.'
-            path = parts.join('/').replace(/\/\.(?=\/)/g, '');
-    
-            return path;
-        }
-     */
+
   private static _match(
     str: string,
     isInverter: boolean,
@@ -214,23 +196,7 @@ export class File {
 
   CreateDir(recursive: boolean = false): void {
     if (!this.IsDir()) {
-      if (recursive) {
-        const list = this.path.split(Path.sep);
-        let f: File;
-        if (list.length > 0) {
-          let dir: string = list[0];
-          for (let i = 0; i < list.length; ) {
-            f = new File(dir);
-            if (!f.IsDir()) {
-              fs.mkdirSync(f.path);
-            }
-            dir += ++i < list.length ? Path.sep + list[i] : "";
-          }
-          return;
-        }
-        return;
-      }
-      fs.mkdirSync(this.path);
+      fs.mkdirSync(this.path, { recursive });
     }
   }
 
@@ -345,10 +311,11 @@ export class File {
 
   /**
    * 安全获取文件元数据（Stats），发生错误或路径不存在时返回 undefined。
+   * 使用 throwIfNoEntry: false 避免捕获大量异常带来的性能损耗。
    */
   private static _stat(path: string): fs.Stats | undefined {
     try {
-      return fs.lstatSync(path);
+      return fs.statSync(path, { throwIfNoEntry: false });
     } catch {
       return undefined;
     }

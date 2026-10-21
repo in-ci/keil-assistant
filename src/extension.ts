@@ -32,6 +32,9 @@ export {
 } from "./services/vscodeSettingsWriter";
 export { File } from "../lib/node_utility/File";
 export { ArmTarget } from "./model/armTarget";
+export { CmdLineHandler } from "./common/cmdLineHandler";
+export { formatTimestamp } from "./common/util";
+export { MacroHandler } from "./model/macroHandler";
 
 /**
  * 插件入口。
