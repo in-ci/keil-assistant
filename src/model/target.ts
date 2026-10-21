@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as event from "events";
 import * as fs from "fs";
+import * as node_path from "path";
 
 import { File } from "../../lib/node_utility/File";
 import { ResourceManager } from "../ResourceManager";
@@ -379,61 +380,75 @@ export abstract class Target implements IView {
     }
 
     const outPath = this.project.toAbsolutePath(rePath);
-    const tasks: (() => Promise<void>)[] = [];
     let changed = false;
 
+    const sourcesToUpdate: Source[] = [];
     for (const group of this.fGroups) {
       for (const source of group.sources) {
-        if (!source.enable) {
-          // 跳过被禁用的源文件
-          continue;
+        if (source.enable) {
+          sourcesToUpdate.push(source);
         }
-
-        tasks.push(async () => {
-          const dPath = File.fromArray([
-            outPath,
-            source.file.noSuffixName + ".d",
-          ]).path;
-
-          let content: string;
-          try {
-            // 只 stat 一次：编译后大部分 '.d' 都没变，无需重复读取和解析
-            const stats = await fs.promises.stat(dPath);
-            if (source.refMtimeMs === stats.mtimeMs) {
-              return;
-            }
-
-            content = await fs.promises.readFile(dPath, "utf8");
-            source.refMtimeMs = stats.mtimeMs;
-          } catch {
-            return; // 该文件还没有被编译过
-          }
-
-          const refFileList = this.parseRefLines(
-            this.targetDOM,
-            content.split(/\r\n|\n/),
-          ).map((rePath) => {
-            return this.project.toAbsolutePath(rePath);
-          });
-
-          const signature = refFileList.join("\n");
-          if (source.refSig === signature) {
-            return; // 依赖列表没有变化，保留现有节点
-          }
-
-          source.refSig = signature;
-          // 只记录路径，子节点等真正展开该文件时再创建
-          source.setRefPaths(refFileList);
-          changed = true;
-        });
       }
     }
 
-    for (let i = 0; i < tasks.length; i += Target.REFS_CONCURRENCY) {
-      await Promise.all(
-        tasks.slice(i, i + Target.REFS_CONCURRENCY).map((task) => task()),
-      );
+    if (sourcesToUpdate.length === 0) {
+      return;
     }
+
+    const processSource = async (source: Source): Promise<void> => {
+      const dPath = node_path.join(outPath, source.file.noSuffixName + ".d");
+
+      let content: string;
+      try {
+        // 只 stat 一次：编译后大部分 '.d' 都没变，无需重复读取和解析
+        const stats = await fs.promises.stat(dPath);
+        if (source.refMtimeMs === stats.mtimeMs) {
+          return;
+        }
+
+        content = await fs.promises.readFile(dPath, "utf8");
+        source.refMtimeMs = stats.mtimeMs;
+      } catch {
+        return; // 该文件还没有被编译过
+      }
+
+      const refFileList = this.parseRefLines(
+        this.targetDOM,
+        content.split(/\r\n|\n/),
+      ).map((itemPath) => {
+        return this.project.toAbsolutePath(itemPath);
+      });
+
+      const signature = refFileList.join("\n");
+      if (source.refSig === signature) {
+        return; // 依赖列表没有变化，保留现有节点
+      }
+
+      source.refSig = signature;
+      // 只记录路径，子节点等真正展开该文件时再创建
+      source.setRefPaths(refFileList);
+      changed = true;
+    };
+
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < sourcesToUpdate.length) {
+        const source = sourcesToUpdate[cursor++];
+        if (source) {
+          await processSource(source);
+        }
+      }
+    };
+
+    const workerCount = Math.min(
+      Target.REFS_CONCURRENCY,
+      sourcesToUpdate.length,
+    );
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < workerCount; i++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
 
     if (changed && !this.isClosed) {
       this._event.emit("dataChanged");

@@ -85,6 +85,9 @@ export class KeilProject implements IView, KeilProjectInfo {
   /** 是否已经关闭，关闭后不再响应监视事件 */
   private isClosed = false;
 
+  /** 路径解析缓存，避免解析成百上千个头文件依赖时重复执行正则与规范化 */
+  private readonly toAbsolutePathCache = new Map<string, string>();
+
   protected _event: event.EventEmitter;
   protected watcher: FileWatcher;
   protected targetList: Target[];
@@ -305,6 +308,7 @@ export class KeilProject implements IView, KeilProjectInfo {
     // 重新加载时先释放上一批 Target 的监视器，否则每次重载都会泄漏句柄
     this.targetList.forEach((target) => target.close());
     this.targetList = [];
+    this.toAbsolutePathCache.clear();
 
     for (const target of targetNodes) {
       this.targetList.push(
@@ -433,6 +437,7 @@ export class KeilProject implements IView, KeilProjectInfo {
     this.watcher.Close();
     this.targetList.forEach((target) => target.close());
     this.targetList = [];
+    this.toAbsolutePathCache.clear();
 
     this.logger.log("[info] project closed: " + this.label);
 
@@ -441,11 +446,20 @@ export class KeilProject implements IView, KeilProjectInfo {
   }
 
   toAbsolutePath(rePath: string): string {
+    let resolved = this.toAbsolutePathCache.get(rePath);
+    if (resolved !== undefined) {
+      return resolved;
+    }
+
     const path = rePath.replace(/\//g, File.sep);
     if (/^[a-z]:/i.test(path)) {
-      return node_path.normalize(path);
+      resolved = node_path.normalize(path);
+    } else {
+      resolved = node_path.normalize(this.uvprjFile.dir + File.sep + path);
     }
-    return node_path.normalize(this.uvprjFile.dir + File.sep + path);
+
+    this.toAbsolutePathCache.set(rePath, resolved);
+    return resolved;
   }
 
   // 当前工程使用带暖橙标题栏的窗口图标，与 Target 的橙色方块呼应

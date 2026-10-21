@@ -56,8 +56,9 @@ export function writeCppProperties(
   }
 
   const content = JSON.stringify(obj, undefined, 4);
+  const normalizedOrigin = origin?.replace(/\r\n/g, "\n");
 
-  if (content !== origin) {
+  if (content !== normalizedOrigin) {
     file.Write(content);
   }
 }

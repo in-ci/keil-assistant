@@ -14,12 +14,14 @@ export class ResourceManager {
   private dirMap: Map<string, File>;
   private iconMap: Map<string, string>;
   private iconUriMap: Map<string, vscode.Uri>;
+  private iconPairMap: Map<string, { light: vscode.Uri; dark: vscode.Uri }>;
 
   private constructor(context: vscode.ExtensionContext) {
     this.extensionDir = new File(context.extensionPath);
     this.dirMap = new Map();
     this.iconMap = new Map();
     this.iconUriMap = new Map();
+    this.iconPairMap = new Map();
     this.init();
   }
 
@@ -103,5 +105,30 @@ export class ResourceManager {
     }
 
     return uri;
+  }
+
+  /**
+   * 缓存成对的图标对象（{ light, dark }），避免侧边栏树节点每次渲染都分配新对象。
+   */
+  getIconPairUri(
+    lightName: string,
+    darkName: string,
+  ): { light: vscode.Uri; dark: vscode.Uri } | undefined {
+    const key = `${lightName}|${darkName}`;
+    let pair = this.iconPairMap.get(key);
+
+    if (pair === undefined) {
+      const lightUri = this.getIconUri(lightName);
+      const darkUri = this.getIconUri(darkName);
+
+      if (!lightUri || !darkUri) {
+        return undefined;
+      }
+
+      pair = { light: lightUri, dark: darkUri };
+      this.iconPairMap.set(key, pair);
+    }
+
+    return pair;
   }
 }

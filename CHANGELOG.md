@@ -8,6 +8,13 @@ All notable changes to the "keil-assistant" extension will be documented in this
 - Optimize: generated `c_cpp_properties.json` follows the workspace root
 - Optimize: run-time files (`keil-assistant.log`, `uv4.log`, `uv4.log.lock`) follow the workspace root too
 - Optimize: split `extension.ts` into focused modules (common/model/services/explorer) and dedupe config/file-watching code
+- Optimize: switch `File.GetList` to `withFileTypes` to eliminate per-file `lstatSync` syscalls
+- Optimize: memoize `toAbsolutePath` in `KeilProject` to accelerate header path resolution
+- Optimize: worker pool concurrency and direct path joins for `.d` reference parsing in `Target`
+- Optimize: fix GNU depfile target-colon lookbehind bug and accelerate reference parsing
+- Optimize: cache `{ light, dark }` URI icon pairs in `ResourceManager` to eliminate allocations in tree rendering
+- Optimize: normalize CRLF in `writeCppProperties` to prevent unnecessary re-writes and C/C++ re-indexing on Windows
+- Optimize: fast `noSuffixName` implementation using `lastIndexOf` instead of array allocation
 ***
 
 ## [v1.7.1]

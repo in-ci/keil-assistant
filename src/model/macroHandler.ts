@@ -5,23 +5,21 @@
  */
 
 export class MacroHandler {
-  /** 普通宏与函数式宏的匹配规则，在实例生命周期内复用 */
-  private regMatchers = {
-    normal_macro: /^#define (\w+) (.*)$/,
-    func_macro: /^#define (\w+\([^)]*\)) (.*)$/,
-  };
+  /** 普通宏与函数式宏的匹配规则 */
+  private static readonly NORMAL_MACRO = /^#define (\w+) (.*)$/;
+  private static readonly FUNC_MACRO = /^#define (\w+\([^)]*\)) (.*)$/;
 
   /**
    * 把一行 '#define' 转换成 defines 表达式。
    * 无法识别（例如多行宏的续行）时返回 undefined，由调用方跳过。
    */
   toExpression(macro: string): string | undefined {
-    let mList = this.regMatchers["normal_macro"].exec(macro);
+    let mList = MacroHandler.NORMAL_MACRO.exec(macro);
     if (mList && mList.length > 2) {
       return `${mList[1]}=${mList[2]}`;
     }
 
-    mList = this.regMatchers["func_macro"].exec(macro);
+    mList = MacroHandler.FUNC_MACRO.exec(macro);
     if (mList && mList.length > 2) {
       return `${mList[1]}=`;
     }

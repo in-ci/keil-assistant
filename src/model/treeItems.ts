@@ -129,7 +129,10 @@ export class Source implements IView {
   }
 
   hasChildViews(): boolean {
-    return this._children !== undefined || this.refPaths !== undefined;
+    return (
+      (this._children !== undefined && this._children.length > 0) ||
+      (this.refPaths !== undefined && this.refPaths.length > 0)
+    );
   }
 }
 

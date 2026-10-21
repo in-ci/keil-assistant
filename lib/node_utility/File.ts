@@ -96,6 +96,9 @@ export class File {
     let isMatch: boolean = false;
 
     for (const reg of regList) {
+      if (reg.global) {
+        reg.lastIndex = 0;
+      }
       if (reg.test(str)) {
         isMatch = true;
         break;
@@ -155,13 +158,8 @@ export class File {
   }
 
   private GetNoSuffixName(name: string): string {
-    const nList = this.name.split(".");
-    if (nList.length > 1) {
-      nList.pop();
-      return nList.join(".");
-    } else {
-      return name;
-    }
+    const index = name.lastIndexOf(".");
+    return index > 0 ? name.substring(0, index) : name;
   }
 
   private _CopyRetainDir(baseDir: File, file: File) {
@@ -224,22 +222,34 @@ export class File {
 
   GetList(fileFilter?: RegExp[], dirFilter?: RegExp[]): File[] {
     const list: File[] = [];
+    let entries: fs.Dirent[];
 
-    for (const name of fs.readdirSync(this.path)) {
+    try {
+      entries = fs.readdirSync(this.path, { withFileTypes: true });
+    } catch {
+      return list;
+    }
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const name = entry.name;
       if (name === "." || name === "..") {
         continue;
       }
 
-      const fullPath = this.path + Path.sep + name;
-      const stats = File._stat(fullPath);
-      const isDir = stats !== undefined && stats.isDirectory();
+      let isDir = entry.isDirectory();
+      if (!isDir && entry.isSymbolicLink()) {
+        const stats = File._stat(this.path + Path.sep + name);
+        isDir = stats !== undefined && stats.isDirectory();
+      }
+
       const filter = isDir ? dirFilter : fileFilter;
 
       if (filter && !File._match(name, false, filter)) {
         continue;
       }
 
-      list.push(new File(fullPath));
+      list.push(new File(this.path + Path.sep + name));
     }
 
     return list;

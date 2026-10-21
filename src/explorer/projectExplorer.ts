@@ -94,13 +94,30 @@ export class ProjectExplorer
           readConfigObject(workspaceConfigFile),
         ).map((entry) => resolveProjectFile(wsFilePath, entry));
 
-        const uvList: File[] = workspace
+        const seenPaths = new Set<string>();
+        const uvList: File[] = [];
+
+        for (const rawPath of workspace
           .GetList([/\.uvproj[x]?$/i], File.EMPTY_FILTER)
           .map((file) => file.path)
           .concat(ResourceManager.getInstance().getProjectFileLocationList())
-          .concat(registeredProjects)
-          .map((path) => new File(vscodeVariables(path)))
-          .filter((file) => !excludeList.includes(file.name));
+          .concat(registeredProjects)) {
+          const resolvedPath = node_path.resolve(vscodeVariables(rawPath));
+          const key =
+            process.platform === "win32"
+              ? resolvedPath.toLowerCase()
+              : resolvedPath;
+
+          if (seenPaths.has(key)) {
+            continue;
+          }
+          seenPaths.add(key);
+
+          const file = new File(resolvedPath);
+          if (!excludeList.includes(file.name)) {
+            uvList.push(file);
+          }
+        }
 
         for (const uvFile of uvList) {
           try {
@@ -399,16 +416,16 @@ export class ProjectExplorer
       case "Source":
         {
           const source = <Source>item;
-          const file = new File(node_path.normalize(source.file.path));
+          const filePath = source.file.path;
 
-          if (file.IsFile()) {
+          if (source.file.IsFile()) {
             // 文件存在，直接打开
 
             let isPreview: boolean = true;
 
             if (
               this.itemClickInfo &&
-              this.itemClickInfo.name === file.path &&
+              this.itemClickInfo.name === filePath &&
               this.itemClickInfo.time + 260 > Date.now()
             ) {
               isPreview = false;
@@ -416,16 +433,16 @@ export class ProjectExplorer
 
             // 重置上一次点击记录
             this.itemClickInfo = {
-              name: file.path,
+              name: filePath,
               time: Date.now(),
             };
 
-            vscode.window.showTextDocument(vscode.Uri.parse(file.ToUri()), {
+            vscode.window.showTextDocument(vscode.Uri.file(filePath), {
               preview: isPreview,
             });
           } else {
             vscode.window.showWarningMessage(
-              `Not found file: ${source.file.path}`,
+              `Not found file: ${filePath}`,
             );
           }
         }
@@ -454,15 +471,12 @@ export class ProjectExplorer
 
     const icons = element.icons;
     if (icons) {
-      const resources = ResourceManager.getInstance();
-      const lightUri = resources.getIconUri(icons.light);
-      const darkUri = resources.getIconUri(icons.dark);
-
-      if (lightUri && darkUri) {
-        res.iconPath = {
-          light: lightUri,
-          dark: darkUri,
-        };
+      const pair = ResourceManager.getInstance().getIconPairUri(
+        icons.light,
+        icons.dark,
+      );
+      if (pair) {
+        res.iconPath = pair;
       }
     }
 

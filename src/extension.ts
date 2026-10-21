@@ -14,6 +14,9 @@ export {
   toConfigPath,
 } from "./config/workspaceConfig";
 export { ProjectConfig } from "./config/projectConfig";
+export { writeCppProperties } from "./services/cppPropertiesWriter";
+export { File } from "../lib/node_utility/File";
+export { ArmTarget } from "./model/armTarget";
 
 /**
  * 插件入口。
