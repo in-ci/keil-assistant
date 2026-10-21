@@ -6,3 +6,4 @@ test
 *.vsix
 dist
 package-lock.json
+.vscode-test
