@@ -316,7 +316,8 @@
     "lint": "oxlint --type-aware src",
     "check": "pnpm run typecheck && pnpm run lint",
     "test": "pnpm run vscode:prepublish && vscode-test",
-    "package": "pnpm run check && vsce package --no-dependencies"
+    "package": "pnpm run check && vsce package --no-dependencies",
+    "release": "node scripts/release.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
