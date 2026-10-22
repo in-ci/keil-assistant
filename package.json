@@ -1,21 +1,22 @@
 {
-  "name": "keil-assistant-2026",
-  "displayName": "Keil Assistant 2026",
-  "description": "An assistant for Keil uVision - 2026 fork",
-  "version": "1.7.0",
-  "publisher": "cl",
+  "name": "keil-assistant",
+  "displayName": "Keil Assistant",
+  "description": "An assistant for Keil uVision (ARM & C51) with clangd support and high performance",
+  "version": "2.0.0",
+  "publisher": "in-ci",
   "author": {
-    "name": "cl",
-    "email": "2584456014@qq.com"
+    "name": "in-ci"
   },
   "keywords": [
     "keil",
     "mdk",
     "c51",
     "8051",
-    "stm32"
+    "stm32",
+    "clangd",
+    "embedded"
   ],
-  "homepage": "https://github.com/github0null/keil-assistant",
+  "homepage": "https://github.com/in-ci/keil-assistant",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -25,22 +26,22 @@
     "Other"
   ],
   "activationEvents": [
-    "*"
+    "workspaceContains:**/*.uvproj",
+    "workspaceContains:**/*.uvprojx"
   ],
   "icon": "res/icons/icon.png",
   "main": "./dist/extension.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/github0null/keil-assistant.git"
+    "url": "https://github.com/in-ci/keil-assistant.git"
   },
   "bugs": {
-    "url": "https://github.com/github0null/keil-assistant/issues",
-    "email": "2584456014@qq.com"
+    "url": "https://github.com/in-ci/keil-assistant/issues"
   },
   "contributes": {
     "configuration": [
       {
-        "title": "Keil Assistant 2026",
+        "title": "Keil Assistant",
         "properties": {
           "KeilAssistant.C51.Uv4Path": {
             "type": "string",
@@ -254,7 +255,7 @@
         {
           "id": "project",
           "icon": "",
-          "name": "Keil uVision 2026 Project"
+          "name": "Keil uVision Project"
         }
       ]
     },
@@ -315,7 +316,7 @@
     "lint": "oxlint --type-aware src lib",
     "check": "pnpm run typecheck && pnpm run lint",
     "test": "pnpm run vscode:prepublish && vscode-test",
-    "package": "pnpm run check && vsce package --no-dependencies --allow-star-activation"
+    "package": "pnpm run check && vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

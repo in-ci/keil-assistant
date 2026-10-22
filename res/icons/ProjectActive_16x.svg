@@ -1,1 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><style type="text/css">.icon-canvas-transparent{opacity:0;fill:#F6F6F6;} .icon-vs-out{fill:#F6F6F6;} .icon-vs-bg{fill:#424242;} .icon-vs-fg{fill:#F0EFF1;} .icon-vs-action-orange{fill:#C27D1A;}</style><path class="icon-canvas-transparent" d="M16 16h-16v-16h16v16z" id="canvas"/><path class="icon-vs-out" d="M16 15h-16v-14h16v14z" id="outline"/><path class="icon-vs-bg" d="M1 2v12h14v-12h-14zm13 11h-12v-8h12v8z" id="iconBg"/><path class="icon-vs-fg" d="M14 13h-12v-8h12v8z" id="iconFg"/><path class="icon-vs-action-orange" d="M1 2h14v3H1z" id="titleBar"/></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 16 16">
+  <defs>
+    <style>
+      .cls-1{fill:#f6f6f6;opacity:0}
+      .cls-2{fill:#f6f6f6}
+      .cls-3{fill:#424242}
+      .cls-4{fill:#f0eff1}
+      .cls-5{fill:#c27d1a}
+    </style>
+  </defs>
+  <title>DeactiveApplication_16x.svg</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="canvas" d="M16 16 L0 16 L0 0 L16 0 Z" class="cls-1"/>
+    <path id="outline" d="M16 15 L0 15 L0 1 L16 1 Z" class="cls-2"/>
+    <path id="iconBg" d="M1 2 L1 14 L15 14 L15 2 Z M14 13 L2 13 L2 5 L14 5 Z" class="cls-3"/>
+    <path id="iconFg" d="M14 13 L2 13 L2 5 L14 5 Z" class="cls-4"/>
+    <g id="canvas-2" data-name="canvas">
+      <path id="XMLID_1_" d="M9.333 14.519 L0.612 14.519 L0.612 6.729 L9.333 6.729 Z" class="cls-1"/>
+    </g>
+    <path id="outline-2" data-name="outline" d="M9.333 9.935 L7.698 8.475 L6.927 9.163 L5.743 9.163 L6.288 8.676 L4.108 6.729 L3.657 6.729 L0.612 9.448 L0.612 9.852 L2.793 11.799 L4.108 10.624 L4.428 10.624 L4.428 13.058 L5.292 13.058 L6.927 14.519 L7.378 14.519 L9.333 12.773 L9.333 12.37 L8.196 11.354 L9.333 10.338 Z" class="cls-2"/>
+    <g id="iconBg-2" data-name="iconBg">
+      <path d="M7.698 11.597 L8.788 12.571 L7.153 14.032 L6.063 13.058 L6.608 12.571 L4.973 12.571 L4.973 10.137 L3.883 10.137 L2.793 11.111 L1.157 9.65 L3.883 7.216 L5.518 8.676 L4.428 9.65 L7.153 9.65 L7.698 9.163 L8.788 10.137 L7.153 11.597 L6.063 10.624 L6.608 10.137 L5.518 10.137 L5.518 12.084 L7.152 12.085 Z" class="cls-5"/>
+    </g>
+  </g>
+</svg>
