@@ -116,14 +116,6 @@
         }
       },
       {
-        "command": "project.rebuild",
-        "title": "Rebuild",
-        "icon": {
-          "light": "./res/icons/BuildSolution_16x.svg",
-          "dark": "./res/icons/BuildSolution_16x.svg"
-        }
-      },
-      {
         "command": "project.download",
         "title": "Download To Device",
         "icon": {
@@ -135,8 +127,16 @@
         "command": "project.buildAndDownload",
         "title": "Build And Download",
         "icon": {
-          "light": "./res/icons/TransferDownload_16x.svg",
-          "dark": "./res/icons/TransferDownload_16x.svg"
+          "light": "./res/icons/BuildAndDownload_16x.svg",
+          "dark": "./res/icons/BuildAndDownload_16x.svg"
+        }
+      },
+      {
+        "command": "project.rebuild",
+        "title": "Rebuild",
+        "icon": {
+          "light": "./res/icons/BuildSolution_16x.svg",
+          "dark": "./res/icons/BuildSolution_16x.svg"
         }
       },
       {
@@ -176,22 +176,22 @@
         },
         {
           "command": "project.build",
-          "group": "inline",
-          "when": "viewItem == Target"
-        },
-        {
-          "command": "project.rebuild",
-          "group": "inline",
+          "group": "inline@1",
           "when": "viewItem == Target"
         },
         {
           "command": "project.download",
-          "group": "inline",
+          "group": "inline@2",
+          "when": "viewItem == Target"
+        },
+        {
+          "command": "project.rebuild",
+          "group": "inline@3",
           "when": "viewItem == Target"
         },
         {
           "command": "project.buildAndDownload",
-          "group": "inline",
+          "group": "inline@4",
           "when": "viewItem == Target"
         },
         {
@@ -207,12 +207,12 @@
         "key": "f7"
       },
       {
-        "command": "project.rebuild",
-        "key": "ctrl+alt+f7"
-      },
-      {
         "command": "project.download",
         "key": "ctrl+alt+d"
+      },
+      {
+        "command": "project.rebuild",
+        "key": "ctrl+alt+f7"
       },
       {
         "command": "project.buildAndDownload",

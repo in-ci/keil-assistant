@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 16 16">
+  <defs>
+    <style>
+      .cls-1{fill:#f6f6f6;opacity:0}
+      .cls-2{fill:#f6f6f6}
+      .cls-3{fill:#f7931e}
+    </style>
+  </defs>
+  <title>TransferDownload_16x.svg</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="canvas" d="M16 16 L0 16 L0 0 L16 0 Z" class="cls-1"/>
+    <path id="outline" d="M2 16 L2 13 L5.851 13 L1.229 8.346 L3.361 6.234 L6 8.893 L6 0 L9 0 L9 8.894 L11.643 6.233 L13.767 8.348 L9.149 13 L13 13 L13 16 Z" class="cls-2"/>
+    <path id="iconBg" d="M3 14 L12 14 L12 15 L3 15 Z M11.646 7.648 L8 11.319 L8 1 L7 1 L7 11.319 L3.355 7.648 L2.645 8.352 L7.5 13.242 L12.354 8.352 Z" class="cls-3"/>
+  </g>
+</svg>
