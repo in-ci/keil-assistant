@@ -1,6 +1,6 @@
 import * as node_path from "path";
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import {
   PROJECT_CONFIG_FILE_NAME,
   WORKSPACE_ROOT_KEY,
@@ -25,6 +25,9 @@ export const RUNTIME_LOCK_FILE_NAME = "uv4.log.lock";
 /** C/C++ 插件读取的配置文件 */
 export const CPP_PROPERTIES_FILE_NAME = "c_cpp_properties.json";
 
+/** VS Code 编辑器设置文件 */
+export const VSCODE_SETTINGS_FILE_NAME = "settings.json";
+
 /**
  * 与“当前工程”相关的运行期路径。
  *
@@ -43,6 +46,8 @@ export interface RuntimePaths {
   lockFile: File;
   /** C/C++ 插件配置 */
   cppPropertiesFile: File;
+  /** VS Code 编辑器设置文件 */
+  settingsFile: File;
 }
 
 /**
@@ -155,6 +160,9 @@ export class ProjectConfig {
       lockFile: new File(dir.path + File.sep + RUNTIME_LOCK_FILE_NAME),
       cppPropertiesFile: new File(
         dir.path + File.sep + CPP_PROPERTIES_FILE_NAME,
+      ),
+      settingsFile: new File(
+        dir.path + File.sep + VSCODE_SETTINGS_FILE_NAME,
       ),
     };
   }

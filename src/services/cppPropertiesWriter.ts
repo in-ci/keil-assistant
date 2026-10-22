@@ -1,4 +1,4 @@
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { isCppProperties } from "../model/cppProperties";
 import type {
   CppConfiguration,
@@ -10,8 +10,12 @@ import type {
  *
  * 设计要点：
  * - 按 `configurations[].name` 合并，保留用户手写的其它字段；
- * - 内容没有变化时不写盘，避免 C/C++ 插件反复重新加载配置；
+ * - 内容没有变化时不写盘，比对前归一化 CRLF，避免 C/C++ 插件反复重新加载配置；
  * - 原文件结构不合法时只记录日志并放弃，绝不覆盖用户配置。
+ *
+ * @param file 目标 c_cpp_properties.json 文件实例
+ * @param configurations 各 Target 解析出的最新 CppConfiguration 列表
+ * @param logger 用于记录异常日志的控制台实例
  */
 export function writeCppProperties(
   file: File,
@@ -56,8 +60,9 @@ export function writeCppProperties(
   }
 
   const content = JSON.stringify(obj, undefined, 4);
+  const normalizedOrigin = origin?.replace(/\r\n/g, "\n");
 
-  if (content !== origin) {
+  if (content !== normalizedOrigin) {
     file.Write(content);
   }
 }

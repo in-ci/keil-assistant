@@ -4,15 +4,13 @@ import * as event from "events";
 import * as fs from "fs";
 import * as node_path from "path";
 
-import { File } from "../../lib/node_utility/File";
-import { FileWatcher } from "../../lib/node_utility/FileWatcher";
-import { Time } from "../../lib/node_utility/Time";
+import { File, FileWatcher } from "../filesystem";
 import { ProjectConfig } from "../config/projectConfig";
 import type { RuntimePaths } from "../config/projectConfig";
 import type { WorkspaceRootInfo } from "../config/workspaceConfig";
 import { RUNTIME_LOCK_FILE_NAME } from "../config/projectConfig";
 import { Debouncer } from "../common/debounce";
-import { getMD5, isKeilTaskRunning } from "../common/util";
+import { formatTimestamp, getMD5, isKeilTaskRunning } from "../common/util";
 import { IView, getIconPair } from "../common/tree";
 import {
   getXmlNode,
@@ -21,6 +19,9 @@ import {
   getXmlText,
 } from "../common/xml";
 import { writeCppProperties } from "../services/cppPropertiesWriter";
+import { writeClangdConfig } from "../services/clangdConfigWriter";
+import { writeCompileCommands } from "../services/compileCommandsWriter";
+import { writeVscodeSettings } from "../services/vscodeSettingsWriter";
 import type { KeilProjectInfo, uVisonInfo } from "./projectInfo";
 import { createTarget } from "./targetFactory";
 import type { Target } from "./target";
@@ -55,7 +56,6 @@ export class KeilProject implements IView, KeilProjectInfo {
   uVsionFileInfo: uVisonInfo;
 
   private activeTargetName: string | undefined;
-  private prevUpdateTime: number | undefined;
 
   /** 防止工程文件被连续保存时并发重载 */
   private isReloading = false;
@@ -76,6 +76,9 @@ export class KeilProject implements IView, KeilProjectInfo {
   /** 工程配置文件监视器：workspaceRoot 修改后切换运行期目录 */
   private configWatcher?: FileWatcher;
 
+  /** 工程文件保存重载的防抖器 */
+  private readonly reloadDebouncer: Debouncer;
+
   /** 依赖列表刷新的防抖器 */
   private readonly sourceRefsDebouncer: Debouncer;
 
@@ -84,6 +87,9 @@ export class KeilProject implements IView, KeilProjectInfo {
 
   /** 是否已经关闭，关闭后不再响应监视事件 */
   private isClosed = false;
+
+  /** 路径解析缓存，避免解析成百上千个头文件依赖时重复执行正则与规范化 */
+  private readonly toAbsolutePathCache = new Map<string, string>();
 
   protected _event: event.EventEmitter;
   protected watcher: FileWatcher;
@@ -110,9 +116,7 @@ export class KeilProject implements IView, KeilProjectInfo {
     });
     this.logger = new console.Console(this.logStream);
 
-    this.logger.log(
-      "[info] Log at : " + Time.GetInstance().GetTimeStamp() + "\r\n",
-    );
+    this.logger.log("[info] Log at : " + formatTimestamp() + "\r\n");
 
     if (configState.created) {
       this.logger.log(
@@ -124,6 +128,9 @@ export class KeilProject implements IView, KeilProjectInfo {
       );
     }
 
+    this.reloadDebouncer = new Debouncer(300, () => {
+      void this.onReload();
+    });
     this.sourceRefsDebouncer = new Debouncer(500, () => {
       this.refreshSourceRefs();
     });
@@ -144,14 +151,7 @@ export class KeilProject implements IView, KeilProjectInfo {
     if (this.isClosed) {
       return;
     }
-
-    if (
-      this.prevUpdateTime === undefined ||
-      this.prevUpdateTime + 2000 < Date.now()
-    ) {
-      this.prevUpdateTime = Date.now();
-      setTimeout(() => this.onReload(), 300);
-    }
+    this.reloadDebouncer.schedule();
   }
 
   /**
@@ -305,6 +305,7 @@ export class KeilProject implements IView, KeilProjectInfo {
     // 重新加载时先释放上一批 Target 的监视器，否则每次重载都会泄漏句柄
     this.targetList.forEach((target) => target.close());
     this.targetList = [];
+    this.toAbsolutePathCache.clear();
 
     for (const target of targetNodes) {
       this.targetList.push(
@@ -365,21 +366,53 @@ export class KeilProject implements IView, KeilProjectInfo {
 
   /**
    * 一次性把所有 Target 的 include/define 写入工作区的
-   * '.vscode/c_cpp_properties.json'。
+   * '.vscode/c_cpp_properties.json'，并依据其内容在 .vscode 同级目录生成 '.clangd'。
    *
-   * 以前是每个 Target 都读取、解析、重写同一个文件，而且无条件写回，
-   * 即使内容没有变化也会让 C/C++ 插件重新加载配置。
+   * 1. 供微软 C/C++ 插件使用的 c_cpp_properties.json 放在 .vscode 目录下；
+   * 2. 供更轻量的 clangd 插件使用的 .clangd 放在 .vscode 同级（工作区根目录）；
+   * 3. 内容没有变化时不写盘，避免两款插件频繁重载与重构索引。
    */
   private updateCppProperties(): void {
     if (this.isClosed || this.targetList.length === 0) {
       return;
     }
 
+    const configs = this.targetList.map((target) =>
+      target.getCppPropertiesConfig(),
+    );
+
+    // 写入/更新 .vscode/c_cpp_properties.json
     writeCppProperties(
       this.getRuntimePaths().cppPropertiesFile,
-      this.targetList.map((target) => target.getCppPropertiesConfig()),
+      configs,
       this.logger,
     );
+
+    // 写入/更新工作区根目录下的 .clangd 文件（.vscode 同级目录）
+    writeClangdConfig(
+      this.getWorkspaceRoot(),
+      configs,
+      this.activeTargetName,
+      this.logger,
+    );
+
+    // 写入/更新工作区根目录下的 compile_commands.json（.vscode 同级目录）
+    // 供 clangd 建立工程全局符号索引，支持跨文件快速“跳转到函数实现”
+    const activeTarget =
+      this.targetList.find((t) => t.targetName === this.activeTargetName) ??
+      this.targetList[0];
+    const activeConfig =
+      configs.find((c) => c.name === this.activeTargetName) ?? configs[0];
+
+    writeCompileCommands(
+      this.getWorkspaceRoot(),
+      activeConfig,
+      activeTarget.getCompileSourceFiles(),
+      this.logger,
+    );
+
+    // 首次打开工程时生成 .vscode/settings.json 减轻编辑器搜索与文件监控负担（若已存在则直接跳过）
+    writeVscodeSettings(this.getWorkspaceRoot(), this.logger);
   }
 
   notifyUpdateView() {
@@ -422,6 +455,7 @@ export class KeilProject implements IView, KeilProjectInfo {
 
     this.sourceRefsDebouncer.cancel();
     this.cppPropertiesDebouncer.cancel();
+    this.reloadDebouncer.cancel();
 
     this.configWatcher?.Close();
     this.configWatcher = undefined;
@@ -433,6 +467,7 @@ export class KeilProject implements IView, KeilProjectInfo {
     this.watcher.Close();
     this.targetList.forEach((target) => target.close());
     this.targetList = [];
+    this.toAbsolutePathCache.clear();
 
     this.logger.log("[info] project closed: " + this.label);
 
@@ -441,11 +476,20 @@ export class KeilProject implements IView, KeilProjectInfo {
   }
 
   toAbsolutePath(rePath: string): string {
-    const path = rePath.replace(/\//g, File.sep);
-    if (/^[a-z]:/i.test(path)) {
-      return node_path.normalize(path);
+    let resolved = this.toAbsolutePathCache.get(rePath);
+    if (resolved !== undefined) {
+      return resolved;
     }
-    return node_path.normalize(this.uvprjFile.dir + File.sep + path);
+
+    const path = rePath.replace(/\//g, File.sep);
+    if (node_path.isAbsolute(path)) {
+      resolved = node_path.normalize(path);
+    } else {
+      resolved = node_path.normalize(this.uvprjFile.dir + File.sep + path);
+    }
+
+    this.toAbsolutePathCache.set(rePath, resolved);
+    return resolved;
   }
 
   // 当前工程使用带暖橙标题栏的窗口图标，与 Target 的橙色方块呼应
@@ -470,6 +514,8 @@ export class KeilProject implements IView, KeilProjectInfo {
   setActiveTarget(tName: string) {
     if (tName !== this.activeTargetName) {
       this.activeTargetName = tName;
+      // 切换活动目标时同步更新 .clangd 关联的编译选项
+      this.updateCppProperties();
       this.notifyUpdateView(); // notify data changed
     }
   }

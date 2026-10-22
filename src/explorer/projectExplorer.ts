@@ -4,7 +4,7 @@ import * as node_path from "path";
 // 允许在配置里使用 ${workspaceFolder} 等变量
 import vscodeVariablesModule = require("vscode-variables");
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { ResourceManager } from "../ResourceManager";
 import { getMD5, openWorkspaceFolder, isWorkspaceFolderOpen } from "../common/util";
 import { IView } from "../common/tree";
@@ -94,13 +94,30 @@ export class ProjectExplorer
           readConfigObject(workspaceConfigFile),
         ).map((entry) => resolveProjectFile(wsFilePath, entry));
 
-        const uvList: File[] = workspace
+        const seenPaths = new Set<string>();
+        const uvList: File[] = [];
+
+        for (const rawPath of workspace
           .GetList([/\.uvproj[x]?$/i], File.EMPTY_FILTER)
           .map((file) => file.path)
           .concat(ResourceManager.getInstance().getProjectFileLocationList())
-          .concat(registeredProjects)
-          .map((path) => new File(vscodeVariables(path)))
-          .filter((file) => !excludeList.includes(file.name));
+          .concat(registeredProjects)) {
+          const resolvedPath = node_path.resolve(vscodeVariables(rawPath));
+          const key =
+            process.platform === "win32"
+              ? resolvedPath.toLowerCase()
+              : resolvedPath;
+
+          if (seenPaths.has(key)) {
+            continue;
+          }
+          seenPaths.add(key);
+
+          const file = new File(resolvedPath);
+          if (!excludeList.includes(file.name)) {
+            uvList.push(file);
+          }
+        }
 
         for (const uvFile of uvList) {
           try {
@@ -306,6 +323,9 @@ export class ProjectExplorer
     return picked?.project;
   }
 
+  /**
+   * 将选中的工程节点设置为当前活动工程，刷新对应的高亮图标。
+   */
   async activeProject(view: IView) {
     const project = this.prjList.get(view.prjID);
     if (project) {
@@ -316,6 +336,10 @@ export class ProjectExplorer
     }
   }
 
+  /**
+   * 弹出下拉框供用户切换当前工程的 Target（构建目标）。
+   * 切换后将同步更新工程树、c_cpp_properties.json 以及 .clangd 编译选项。
+   */
   async switchTargetByProject(view: IView) {
     const prj = this.prjList.get(view.prjID);
     if (prj) {
@@ -335,6 +359,11 @@ export class ProjectExplorer
     }
   }
 
+  /**
+   * 获取指定的构建目标 Target 实例。
+   * - 若传入树节点 view，则获取该节点对应的 Target；
+   * - 若未传入 view，则默认获取当前活动工程的活动 Target。
+   */
   getTarget(view?: IView): Target | undefined {
     if (view) {
       const prj = this.prjList.get(view.prjID);
@@ -399,16 +428,16 @@ export class ProjectExplorer
       case "Source":
         {
           const source = <Source>item;
-          const file = new File(node_path.normalize(source.file.path));
+          const filePath = source.file.path;
 
-          if (file.IsFile()) {
+          if (source.file.IsFile()) {
             // 文件存在，直接打开
 
             let isPreview: boolean = true;
 
             if (
               this.itemClickInfo &&
-              this.itemClickInfo.name === file.path &&
+              this.itemClickInfo.name === filePath &&
               this.itemClickInfo.time + 260 > Date.now()
             ) {
               isPreview = false;
@@ -416,16 +445,16 @@ export class ProjectExplorer
 
             // 重置上一次点击记录
             this.itemClickInfo = {
-              name: file.path,
+              name: filePath,
               time: Date.now(),
             };
 
-            vscode.window.showTextDocument(vscode.Uri.parse(file.ToUri()), {
+            vscode.window.showTextDocument(vscode.Uri.file(filePath), {
               preview: isPreview,
             });
           } else {
             vscode.window.showWarningMessage(
-              `Not found file: ${source.file.path}`,
+              `Not found file: ${filePath}`,
             );
           }
         }
@@ -435,6 +464,9 @@ export class ProjectExplorer
     }
   }
 
+  /**
+   * 将内部视图模型 IView 转换为 VS Code 侧边栏 TreeItem 渲染对象。
+   */
   getTreeItem(element: IView): vscode.TreeItem | Thenable<vscode.TreeItem> {
     const res = new vscode.TreeItem(element.label);
 
@@ -454,21 +486,30 @@ export class ProjectExplorer
 
     const icons = element.icons;
     if (icons) {
-      const resources = ResourceManager.getInstance();
-      const lightUri = resources.getIconUri(icons.light);
-      const darkUri = resources.getIconUri(icons.dark);
-
-      if (lightUri && darkUri) {
-        res.iconPath = {
-          light: lightUri,
-          dark: darkUri,
-        };
+      const pair = ResourceManager.getInstance().getIconPairUri(
+        icons.light,
+        icons.dark,
+      );
+      if (pair) {
+        res.iconPath = pair;
       }
     }
 
     return res;
   }
 
+  /**
+   * 获取当前活动的工程对象。
+   */
+  getActiveProject(): KeilProject | undefined {
+    return this.currentActiveProject;
+  }
+
+  /**
+   * 获取指定树节点的子级视图列表。
+   * - element 为 undefined 时，返回工作区根级工程列表；
+   * - 否则调用节点的 getChildViews() 获取下级节点。
+   */
   getChildren(element?: IView): vscode.ProviderResult<IView[]> {
     if (element === undefined) {
       return Array.from(this.prjList.values());

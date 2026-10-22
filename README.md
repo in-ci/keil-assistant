@@ -1,124 +1,115 @@
-# Keil Assistant
+# Keil Assistant (v2.0)
 
-## 此插件已不再更新，如有需要，请下载源码自行编译后使用
+VS Code 平台上的 Keil uVision 辅助增强插件（支持 ARM MDK 与 C51）。
 
-[![](https://vsmarketplacebadge.apphb.com/version/CL.keil-assistant.svg)](https://marketplace.visualstudio.com/items?itemName=CL.keil-assistant)      [![](https://vsmarketplacebadge.apphb.com/installs/CL.keil-assistant.svg)](https://marketplace.visualstudio.com/items?itemName=CL.keil-assistant)     [![](https://vsmarketplacebadge.apphb.com/downloads/CL.keil-assistant.svg)](https://marketplace.visualstudio.com/items?itemName=CL.keil-assistant)     [![](https://vsmarketplacebadge.apphb.com/rating/CL.keil-assistant.svg)](https://marketplace.visualstudio.com/items?itemName=CL.keil-assistant)
+## [English Documentation](./README_EN.md)
 
-## [English](./README_EN.md)
+***
+
+## 📌 项目背景与致谢 (Credits & Provenance)
+
+- **上游原项目**：本项目基于 [github0null/keil-assistant](https://github.com/github0null/keil-assistant) 进行深度重构与功能现代化升级。
+- **项目仓库**：[in-ci/keil-assistant](https://github.com/in-ci/keil-assistant)
+- **AI 协同研发**：本项目 2.0 版本的架构重构、clangd 编译数据库生成、性能基准调优、并发控制及全流程自动化测试均深度借助 **AI（Google DeepMind Antigravity）** 结对协同编程完成。
+
+***
 
 ## 简述 📑
 
-vscode 上的 Keil 辅助工具，与 c/c++ 插件配合使用.
+Keil Assistant 是一款面向嵌入式开发者的 VS Code 扩展。为 Keil 项目提供目录树展示、语法高亮、代码片段、源码依赖跟踪，并支持在 VS Code 内直接调用 Keil 命令行进行 **编译、重新编译、一键下载烧录**。
 
-能够为 Keil 项目提供 语法高亮、代码片段 的功能，并支持对 keil 项目进行 编译、下载。
+不仅兼容微软 **C/C++（ms-vscode.cpptools）** 插件，2.0 版本更原生支持了更轻量、跳转更迅速的 **clangd（llvm-vs-code-extensions.vscode-clangd）** 语言服务器！
 
-**仅支持 Keil uVison 5 及以上版本**  
-
-**仅支持 Windows 平台**
+**系统与环境要求**：
+- **仅支持 Windows 平台**
+- **支持 Keil uVision 5 及以上版本**
+- **VS Code >= 1.85.0**
 
 ![preview](./res/preview/preview.png)
 
 ***
 
-## 功能特性🎉
+## 🌟 v2.0 核心特性与亮点 🎉
 
-- 加载 Keil C51/ARM 项目，并以 Keil 项目资源管理器的展示方式显示项目视图
-- 自动监视 keil 项目文件的变化，及时更新项目视图
-- 通过调用 Keil 命令行接口实现 编译，重新编译，烧录 keil 项目
-- 自动生成 c_cpp_properties.json 文件，使 C/C++ 插件的语法分析能正常进行
+### 1. 🚀 原生 clangd 语言服务完整支持
+相较于体积庞大、在复杂工程中容易卡顿的微软 C/C++ 插件，clangd 具有内存占用低、毫秒级补全与精确跳转等显著优势：
+- **自动生成 `.clangd` 配置文件**：放置于工作区根目录，自动映射当前 Target 的包含路径与预处理宏；
+- **自动生成 `compile_commands.json` 编译数据库**：抽取所有参与构建的 `.c/.cpp` 源文件并构建完整的编译标志，支持**跨文件全局符号索引与 F12 秒级“跳转到函数实现”**；
+- **智能宏清洗与存根过滤**：过滤破坏 Clang 原生语法的遗留伪宏（如 `__enable_irq()=` 等），消除 CMSIS 核心头文件报错；
+- **第三方驱动库诊断压制**：内置针对 STM32 HAL / 标准外设库的无用诊断过滤规则，杜绝因头文件前置引用导致的虚假红线。
 
-***
-
-## 用法 📖
-
-### 准备工作
-
-1. 安装 C/C++ 插件
->
-2. 进入 Keil-Assistant 插件设置，设置好 keil 可执行文件 UV4.exe 的绝对路径
- 
- ![setting](./res/preview/setting.png)
+### 2. 📂 自由指定工作区根目录
+- 支持将工作区设置在项目根目录（例如将工作区设在上层代码根目录，而工程位于 `Projects/MDK-ARM`）；
+- 在 `.vscode/keil-assistant.json` 中自动持久化工作区定位与关联工程。
 
 ***
 
-### 开始使用 🏃‍♀️
+## 📖 使用指南
 
-1. 在 Keil 上创建好项目，添加好文件，头文件路径等
-> 
-2. 点击 **打开项目** 图标 或者 **使用 vscode 直接打开 keil 项目文件(.uvproj) 所在的目录**，插件会自动加载 keil 项目；
- 
- ![load](./res/preview/load.png)
+### 1. 准备工作
 
-### 常用操作
+1. 安装代码浏览插件（**二选一**）：
+   - **方式 A（推荐，轻量飞速）**：安装 **clangd** 扩展（`llvm-vs-code-extensions.vscode-clangd`），同时建议在设置中将微软 C/C++ 插件的 IntelliSense 设为 disabled；
+   - **方式 B（传统模式）**：安装微软官方 **C/C++** 扩展（`ms-vscode.cpptools`）。
+2. 在 Keil-Assistant 插件设置中配置对应工具链的 `UV4.exe` 绝对路径：
+   - ARM（MDK）路径示例：`C:\Keil_v5\UV4\UV4.exe`
+   - C51 路径示例：`C:\Keil_v5\UV4\UV4.exe`
 
-- **编译，烧录**：提供了 3 个按钮，分别代表 编译，下载，重新编译
- 
- ![build](./res/preview/build.png)
-
->
-
-- **保存和刷新**：在 Keil 上添加/删除源文件，更改，配置项目，更改完毕后点击 **保存所有**，插件检测到 keil 项目变化后会自动刷新项目
- 
- ![keil_save_all](./res/preview/keil_save_all.png)
-
->
-
-- **打开源文件**：单击源文件将以预览模式打开，双击源文件将切换到非预览模式打开
- 
- ![open_file](./res/preview/open_file.png)
-
->
-
-- **切换 c/c++ 插件的配置**：点击目标名称在多个 c/c++ 配置中切换
- 
- ![cpp_config](./res/preview/cpp_config.png)
-
->
-
-- **切换 keil Target**：点击项目的切换按钮，可以在多个 Keil Target 之间切换
- 
- ![active_target](./res/preview/active_target.png)
-
->
-
-- **展开引用**：在编译完成后，可以点击源文件项的箭头图标展开其引用（仅支持 ARM 项目）
- 
- ![show_referance](./res/preview/ref_show.png)
+   ![setting](./res/preview/setting.png)
 
 ***
 
-### 其他设置
+### 2. 打开与加载工程 🏃‍♀️
 
-- 工作区设置：项目排除列表(`KeilAssistant.Project.ExcludeList`)
- 当某个目录下存在多个 keil 项目时，使用插件打开该目录，插件会加载所有的 keil 项目，通过此选项，可以指定需要排除哪些 keil 项目，防止在打开该工作区时自动加载该项目
- **默认的排除列表**：
-  ```json
-  [
-      "template.uvproj",
-      "template.uvprojx"
-  ]
-  ```
+1. 点击侧边栏 **打开项目** 图标，或**直接在 VS Code 中打开包含 Keil 工程文件（`.uvproj / .uvprojx`）的目录**；
+2. 插件会自动解析 Target、宏定义、包含目录和文件分组，并在根目录下生成相应的补全配置：
 
-- 工程工作区位置：工程文件（`.uvprojx`）所在的目录下会生成 `.vscode/keil-assistant.json`，用来记录打开工程时使用的工作区根目录
-  ```json
-  {
-      "workspaceRoot": "."
-  }
-  ```
-  - `workspaceRoot` 默认为 `.`，即工程文件所在目录，与旧版本行为一致
-  - 支持相对路径（相对工程文件所在目录，例如 MDK 工程位于 `Projects/MDK-ARM` 时填 `"../.."`）和绝对路径
-  - 打开工程后，插件会提示是否切换到该工作区；也可以点击通知里的 **Change Location...**，或右键工程选择 **Keil Assistant: Set Workspace Root** 重新指定目录
-  - 切换工作区后，插件会把工程登记到目标工作区 `.vscode/keil-assistant.json` 的 `projectFiles` 中（相对路径），下次打开该工作区时自动加载工程
-  - 配置的目录不存在时会回退到工程文件所在目录，并给出提示
+   ![load](./res/preview/load.png)
 
-  生成的 `c_cpp_properties.json` 会写入当前工作区根目录的 `.vscode` 下，保证 C/C++ 插件能读取到
+***
 
-  插件的运行期文件（`keil-assistant.log`、`uv4.log`、`uv4.log.lock`）同样写入当前工作区根目录的 `.vscode` 下；修改 `workspaceRoot` 后重新打开工程即可生效（当前窗口的日志文件不会中途搬移）
+### 3. 常用操作快捷按钮
 
-### 还有其他问题 ？
+- **编译与烧录**：
+  - **Build (增量编译)**：调用 Keil 增量构建当前活动 Target；
+  - **Rebuild (重新编译)**：全量重新构建；
+  - **Download (下载烧录)**：调用配置的调试器/下载器向目标芯片烧录程序。
 
-可以到以下位置进行交流
+  ![build](./res/preview/build.png)
 
-- [论坛: https://discuss.em-ide.com/t/keil-assistant](https://discuss.em-ide.com/t/keil-assistant)
+- **自动刷新**：在 Keil 中增删源文件并保存后，插件监视器会自动感知并同步刷新工程树。
+- **活动 Target 切换**：点击工程栏切换按钮，可随时切换不同的 Target，插件会自动联动更新 `.clangd` 和 `c_cpp_properties.json` 的编译参数。
 
-- [Github Issue: https://github.com/github0null/keil-assistant/issues](https://github.com/github0null/keil-assistant/issues)
+  ![active_target](./res/preview/active_target.png)
+
+- **查看源码依赖引用**：编译完成后，可展开源文件子箭头查看其包含的头文件列表（支持 ARM 工具链）。
+
+  ![show_referance](./res/preview/ref_show.png)
+
+***
+
+## 🛠️ 本地开发与打包构建
+
+```bash
+# 1. 安装依赖
+pnpm install
+
+# 2. 代码检查与类型校验
+pnpm run check
+
+# 3. 运行自动化单元测试套件
+pnpm test
+
+# 4. 一键构建生产环境 VSIX 扩展安装包
+pnpm run package
+```
+
+打包成功后会在根目录下生成 `keil-assistant-2.0.0.vsix`，可在 VS Code 扩展面板中选择 **「从 VSIX 安装...」** 直接体验。
+
+***
+
+## 💬 问题反馈与交流
+
+欢迎提交 Issue 或 Pull Request：
+- [GitHub Issues: https://github.com/in-ci/keil-assistant/issues](https://github.com/in-ci/keil-assistant/issues)
+- [上游原仓库: https://github.com/github0null/keil-assistant](https://github.com/github0null/keil-assistant)

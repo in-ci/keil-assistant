@@ -14,6 +14,27 @@ export {
   toConfigPath,
 } from "./config/workspaceConfig";
 export { ProjectConfig } from "./config/projectConfig";
+export { writeCppProperties } from "./services/cppPropertiesWriter";
+export {
+  writeClangdConfig,
+  generateClangdContent,
+  isClangdIncompatibleDefine,
+} from "./services/clangdConfigWriter";
+export {
+  writeCompileCommands,
+  generateCompileCommands,
+} from "./services/compileCommandsWriter";
+export {
+  writeVscodeSettings,
+  generateVscodeSettingsContent,
+  DEFAULT_VSCODE_SETTINGS,
+  VSCODE_SETTINGS_FILE_NAME,
+} from "./services/vscodeSettingsWriter";
+export { File } from "./filesystem";
+export { ArmTarget } from "./model/armTarget";
+export { CmdLineHandler } from "./common/cmdLineHandler";
+export { formatTimestamp } from "./common/util";
+export { MacroHandler } from "./model/macroHandler";
 
 /**
  * 插件入口。

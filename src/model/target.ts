@@ -1,9 +1,11 @@
 import * as vscode from "vscode";
 import * as event from "events";
 import * as fs from "fs";
+import * as node_path from "path";
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { ResourceManager } from "../ResourceManager";
+import { CmdLineHandler } from "../common/cmdLineHandler";
 import { IView, getIconPair } from "../common/tree";
 import {
   XmlNode,
@@ -208,10 +210,6 @@ export abstract class Target implements IView {
     await this.updateSourceRefs();
   }
 
-  private quoteString(str: string, quote: string = '"'): string {
-    return str.includes(" ") ? quote + str + quote : str;
-  }
-
   private runTask(
     name: string,
     commands: string[],
@@ -234,17 +232,7 @@ export abstract class Target implements IView {
     args.push("-o", this.project.getRuntimePaths().uv4LogFile.path);
     args = args.concat(commands);
 
-    const isCmd = /cmd.exe$/i.test(vscode.env.shell);
-    const quote = isCmd ? '"' : "'";
-    const invokePrefix = isCmd ? "" : "& ";
-    const cmdPrefixSuffix = isCmd ? '"' : "";
-
-    let commandLine = invokePrefix + this.quoteString(builderExe, quote) + " ";
-    commandLine += args
-      .map((arg) => {
-        return this.quoteString(arg, quote);
-      })
-      .join(" ");
+    const commandLine = CmdLineHandler.getCommandLine(builderExe, args);
 
     // 有工作区时用任务运行
     if (
@@ -257,9 +245,7 @@ export abstract class Target implements IView {
         name,
         "shell",
       );
-      task.execution = new vscode.ShellExecution(
-        cmdPrefixSuffix + commandLine + cmdPrefixSuffix,
-      );
+      task.execution = new vscode.ShellExecution(commandLine);
       task.isBackground = false;
       task.problemMatchers = this.getProblemMatcher();
       task.presentationOptions = {
@@ -379,61 +365,75 @@ export abstract class Target implements IView {
     }
 
     const outPath = this.project.toAbsolutePath(rePath);
-    const tasks: (() => Promise<void>)[] = [];
     let changed = false;
 
+    const sourcesToUpdate: Source[] = [];
     for (const group of this.fGroups) {
       for (const source of group.sources) {
-        if (!source.enable) {
-          // 跳过被禁用的源文件
-          continue;
+        if (source.enable) {
+          sourcesToUpdate.push(source);
         }
-
-        tasks.push(async () => {
-          const dPath = File.fromArray([
-            outPath,
-            source.file.noSuffixName + ".d",
-          ]).path;
-
-          let content: string;
-          try {
-            // 只 stat 一次：编译后大部分 '.d' 都没变，无需重复读取和解析
-            const stats = await fs.promises.stat(dPath);
-            if (source.refMtimeMs === stats.mtimeMs) {
-              return;
-            }
-
-            content = await fs.promises.readFile(dPath, "utf8");
-            source.refMtimeMs = stats.mtimeMs;
-          } catch {
-            return; // 该文件还没有被编译过
-          }
-
-          const refFileList = this.parseRefLines(
-            this.targetDOM,
-            content.split(/\r\n|\n/),
-          ).map((rePath) => {
-            return this.project.toAbsolutePath(rePath);
-          });
-
-          const signature = refFileList.join("\n");
-          if (source.refSig === signature) {
-            return; // 依赖列表没有变化，保留现有节点
-          }
-
-          source.refSig = signature;
-          // 只记录路径，子节点等真正展开该文件时再创建
-          source.setRefPaths(refFileList);
-          changed = true;
-        });
       }
     }
 
-    for (let i = 0; i < tasks.length; i += Target.REFS_CONCURRENCY) {
-      await Promise.all(
-        tasks.slice(i, i + Target.REFS_CONCURRENCY).map((task) => task()),
-      );
+    if (sourcesToUpdate.length === 0) {
+      return;
     }
+
+    const processSource = async (source: Source): Promise<void> => {
+      const dPath = node_path.join(outPath, source.file.noSuffixName + ".d");
+
+      let content: string;
+      try {
+        // 只 stat 一次：编译后大部分 '.d' 都没变，无需重复读取和解析
+        const stats = await fs.promises.stat(dPath);
+        if (source.refMtimeMs === stats.mtimeMs) {
+          return;
+        }
+
+        content = await fs.promises.readFile(dPath, "utf8");
+        source.refMtimeMs = stats.mtimeMs;
+      } catch {
+        return; // 该文件还没有被编译过
+      }
+
+      const refFileList = this.parseRefLines(
+        this.targetDOM,
+        content.split(/\r\n|\n/),
+      ).map((itemPath) => {
+        return this.project.toAbsolutePath(itemPath);
+      });
+
+      const signature = refFileList.join("\n");
+      if (source.refSig === signature) {
+        return; // 依赖列表没有变化，保留现有节点
+      }
+
+      source.refSig = signature;
+      // 只记录路径，子节点等真正展开该文件时再创建
+      source.setRefPaths(refFileList);
+      changed = true;
+    };
+
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < sourcesToUpdate.length) {
+        const source = sourcesToUpdate[cursor++];
+        if (source) {
+          await processSource(source);
+        }
+      }
+    };
+
+    const workerCount = Math.min(
+      Target.REFS_CONCURRENCY,
+      sourcesToUpdate.length,
+    );
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < workerCount; i++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
 
     if (changed && !this.isClosed) {
       this._event.emit("dataChanged");
@@ -452,19 +452,54 @@ export abstract class Target implements IView {
     return true;
   }
 
+  /**
+   * 获取当前 Target 下所有参与编译的源文件绝对路径列表（.c, .cpp, .cxx, .cc 等）。
+   * 仅包含所在 Group 未被排除且文件本身未被排除的源码文件。
+   */
+  getCompileSourceFiles(): string[] {
+    const result: string[] = [];
+    const sourceSuffixes = new Set([".c", ".cpp", ".cxx", ".cc", ".c++"]);
+
+    for (const group of this.fGroups) {
+      for (const source of group.sources) {
+        if (!source.enable) {
+          continue;
+        }
+        const ext = node_path.extname(source.file.path).toLowerCase();
+        if (sourceSuffixes.has(ext)) {
+          result.push(source.file.path);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /** 检查工程 XML 节点结构是否符合当前目标要求 */
   protected abstract checkProject(target: XmlNode): Error | undefined;
 
+  /** 获取头文件搜索路径原始字符串 */
   protected abstract getIncString(target: XmlNode): string;
+  /** 获取预编译宏定义原始字符串 */
   protected abstract getDefineString(target: XmlNode): string;
+  /** 获取工具链内置系统宏定义列表 */
   protected abstract getSysDefines(target: XmlNode): string[];
+  /** 获取分组节点列表 */
   protected abstract getGroups(target: XmlNode): XmlNode[];
+  /** 获取系统内置标准库头文件目录 */
   protected abstract getSystemIncludes(target: XmlNode): string[] | undefined;
 
+  /** 获取构建输出中间产物目录（.d 文件所在目录） */
   protected abstract getOutputFolder(target: XmlNode): string | undefined;
+  /** 解析 .d 文件中的头文件依赖行 */
   protected abstract parseRefLines(target: XmlNode, lines: string[]): string[];
 
+  /** 获取 VS Code Task 使用的问题匹配器 ID */
   protected abstract getProblemMatcher(): string[];
+  /** 获取增量编译构建参数 */
   protected abstract getBuildCommand(): string[];
+  /** 获取全部重新构建参数 */
   protected abstract getRebuildCommand(): string[];
+  /** 获取烧录下载参数 */
   protected abstract getDownloadCommand(): string[];
 }

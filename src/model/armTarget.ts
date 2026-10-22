@@ -1,7 +1,7 @@
 import * as node_path from "path";
 import * as child_process from "child_process";
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { ResourceManager } from "../ResourceManager";
 import { CmdLineHandler } from "../CmdLineHandler";
 import {
@@ -174,30 +174,45 @@ export class ArmTarget extends Target {
 
   private gnu_parseRefLines(lines: string[]): string[] {
     const resultList: Set<string> = new Set();
+    const len = lines.length;
+    if (len === 0) {
+      return [];
+    }
 
-    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-      const _line = lines[lineIndex];
+    // 第一行去掉目标文件前缀（如 "main.o:"）
+    let firstLine = lines[0];
+    const colonIndex = firstLine.indexOf(":");
+    if (colonIndex !== -1) {
+      firstLine = firstLine.substring(colonIndex + 1);
+    }
 
-      const line =
-        _line[_line.length - 1] === "\\"
-          ? _line.substring(0, _line.length - 1)
-          : _line; // remove char '\'
-      const subLines = line.trim().split(/(?<![\\:]) /);
+    for (let lineIndex = 0; lineIndex < len; lineIndex++) {
+      let line = lineIndex === 0 ? firstLine : lines[lineIndex];
+      if (!line) {
+        continue;
+      }
 
-      if (lineIndex === 0) // first line
-      {
-        for (
-          let i = 1;
-          i < subLines.length;
-          i++ // skip first sub line
-        ) {
-          resultList.add(subLines[i].trim().replace(/\\ /g, " "));
+      line = line.trim();
+      if (line.length === 0) {
+        continue;
+      }
+
+      // 去掉行尾续行反斜杠
+      if (line.charCodeAt(line.length - 1) === 92 /* '\\' */) {
+        line = line.substring(0, line.length - 1).trimEnd();
+      }
+
+      if (line.length === 0) {
+        continue;
+      }
+
+      // 按未转义的空格切分，保留包含转义空格的路径（"\\ "）
+      const subLines = line.split(/(?<!\\) +/);
+      for (const item of subLines) {
+        const trimmed = item.trim();
+        if (trimmed.length > 0) {
+          resultList.add(trimmed.replace(/\\ /g, " "));
         }
-      } else // other lines, first char is whitespace
-      {
-        subLines.forEach((item) => {
-          resultList.add(item.trim().replace(/\\ /g, " "));
-        });
       }
     }
 
@@ -210,8 +225,10 @@ export class ArmTarget extends Target {
     for (let i = startIndex; i < lines.length; i++) {
       const sepIndex = lines[i].indexOf(": ");
       if (sepIndex > 0) {
-        const line: string = lines[i].substring(sepIndex + 1).trim();
-        resultList.add(line);
+        const line: string = lines[i].substring(sepIndex + 2).trim();
+        if (line.length > 0) {
+          resultList.add(line);
+        }
       }
     }
 
@@ -278,27 +295,26 @@ export class ArmTarget extends Target {
         " " +
         ["--target=arm-arm-none-eabi", "-E", "-dM", "-", "<nul"].join(" ");
 
-      const lines = child_process
+      const output = child_process
         .execSync(cmdLine, {
           timeout: 20000,
           windowsHide: true,
           maxBuffer: 4 * 1024 * 1024,
         })
-        .toString()
-        .split(/\r\n|\n/);
+        .toString();
+      const lines = output.split(/\r\n|\n/);
       const resList: string[] = [];
       const mHandler = new MacroHandler();
 
-      lines
-        .filter((line) => {
-          return line.trim() !== "";
-        })
-        .forEach((line) => {
-          const value = mHandler.toExpression(line);
-          if (value) {
-            resList.push(value);
-          }
-        });
+      for (const line of lines) {
+        if (line.trim().length === 0) {
+          continue;
+        }
+        const value = mHandler.toExpression(line);
+        if (value) {
+          resList.push(value);
+        }
+      }
 
       return resList;
     } catch {
@@ -328,6 +344,9 @@ export class ArmTarget extends Target {
     return undefined;
   }
 
+  /**
+   * 从 XML 中提取 TargetArmAds 节点配置的头文件包含目录。
+   */
   protected getIncString(target: XmlNode): string {
     return (
       getXmlText(
@@ -343,6 +362,9 @@ export class ArmTarget extends Target {
     );
   }
 
+  /**
+   * 从 XML 中提取 TargetArmAds 节点配置的用户宏定义。
+   */
   protected getDefineString(target: XmlNode): string {
     return (
       getXmlText(
@@ -358,14 +380,23 @@ export class ArmTarget extends Target {
     );
   }
 
+  /**
+   * 获取 ARM 工程中的源码分组节点列表。
+   */
   protected getGroups(target: XmlNode): XmlNode[] {
     return getXmlNodes(getXmlValue(target, "Groups", "Group"));
   }
 
+  /**
+   * 获取支持 ARMCC 与 GCC (ARMClang) 报错格式的问题匹配器。
+   */
   protected getProblemMatcher(): string[] {
     return ["$armcc", "$gcc"];
   }
 
+  /**
+   * 构造 ARM 增量构建命令参数。
+   */
   protected getBuildCommand(): string[] {
     return [
       "--uv4Path",
@@ -379,6 +410,9 @@ export class ArmTarget extends Target {
     ];
   }
 
+  /**
+   * 构造 ARM 全量重新构建命令参数。
+   */
   protected getRebuildCommand(): string[] {
     return [
       "--uv4Path",
@@ -392,6 +426,9 @@ export class ArmTarget extends Target {
     ];
   }
 
+  /**
+   * 构造 ARM 固件烧录下载命令参数。
+   */
   protected getDownloadCommand(): string[] {
     return [
       "--uv4Path",

@@ -43,23 +43,37 @@ export class File {
     return this._dir;
   }
 
+  /**
+   * 将路径片段数组拼接为 File 实例。
+   */
   static fromArray(pathArray: string[]): File {
     return new File(pathArray.join(File.sep));
   }
 
+  /**
+   * 将路径统一转换为 Unix 正斜杠风格。
+   */
   static ToUnixPath(path: string): string {
     return Path.normalize(path).replace(/\\{1,}/g, "/");
   }
 
+  /**
+   * 将文件路径转换为带 file:// 协议头的 URI 字符串。
+   */
   static ToUri(path: string): string {
     return "file://" + this.ToNoProtocolUri(path);
   }
 
+  /**
+   * 将文件路径转换为 URI 编码字符串（不含协议头）。
+   */
   static ToNoProtocolUri(path: string): string {
     return "/" + encodeURIComponent(path.replace(/\\/g, "/"));
   }
 
-  // c:/abcd/../a -> c:\abcd\..\a
+  /**
+   * 转换为当前操作系统本地风格路径（如 Windows 下使用反斜杠）。
+   */
   static ToLocalPath(path: string): string {
     const res = File.ToUnixPath(path);
 
@@ -69,25 +83,7 @@ export class File {
 
     return res;
   }
-  /* 
-        // ./././aaaa/././././bbbb => ./aaaa/bbbb
-        private static DelRepeatedPath(_path: string) {
-    
-            let path = _path;
-    
-            // 去掉路径中的 '..'
-            let parts = path.split('/');
-            let index = -1;
-            while ((index = parts.indexOf('..')) > 0) {
-                parts.splice(index - 1, 2);
-            }
-    
-            // 去掉路径中的 '.'
-            path = parts.join('/').replace(/\/\.(?=\/)/g, '');
-    
-            return path;
-        }
-     */
+
   private static _match(
     str: string,
     isInverter: boolean,
@@ -96,6 +92,9 @@ export class File {
     let isMatch: boolean = false;
 
     for (const reg of regList) {
+      if (reg.global) {
+        reg.lastIndex = 0;
+      }
       if (reg.test(str)) {
         isMatch = true;
         break;
@@ -155,13 +154,8 @@ export class File {
   }
 
   private GetNoSuffixName(name: string): string {
-    const nList = this.name.split(".");
-    if (nList.length > 1) {
-      nList.pop();
-      return nList.join(".");
-    } else {
-      return name;
-    }
+    const index = name.lastIndexOf(".");
+    return index > 0 ? name.substring(0, index) : name;
   }
 
   private _CopyRetainDir(baseDir: File, file: File) {
@@ -202,44 +196,40 @@ export class File {
 
   CreateDir(recursive: boolean = false): void {
     if (!this.IsDir()) {
-      if (recursive) {
-        const list = this.path.split(Path.sep);
-        let f: File;
-        if (list.length > 0) {
-          let dir: string = list[0];
-          for (let i = 0; i < list.length; ) {
-            f = new File(dir);
-            if (!f.IsDir()) {
-              fs.mkdirSync(f.path);
-            }
-            dir += ++i < list.length ? Path.sep + list[i] : "";
-          }
-          return;
-        }
-        return;
-      }
-      fs.mkdirSync(this.path);
+      fs.mkdirSync(this.path, { recursive });
     }
   }
 
   GetList(fileFilter?: RegExp[], dirFilter?: RegExp[]): File[] {
     const list: File[] = [];
+    let entries: fs.Dirent[];
 
-    for (const name of fs.readdirSync(this.path)) {
+    try {
+      entries = fs.readdirSync(this.path, { withFileTypes: true });
+    } catch {
+      return list;
+    }
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const name = entry.name;
       if (name === "." || name === "..") {
         continue;
       }
 
-      const fullPath = this.path + Path.sep + name;
-      const stats = File._stat(fullPath);
-      const isDir = stats !== undefined && stats.isDirectory();
+      let isDir = entry.isDirectory();
+      if (!isDir && entry.isSymbolicLink()) {
+        const stats = File._stat(this.path + Path.sep + name);
+        isDir = stats !== undefined && stats.isDirectory();
+      }
+
       const filter = isDir ? dirFilter : fileFilter;
 
       if (filter && !File._match(name, false, filter)) {
         continue;
       }
 
-      list.push(new File(fullPath));
+      list.push(new File(this.path + Path.sep + name));
     }
 
     return list;
@@ -292,50 +282,87 @@ export class File {
 
   //-------------------------------------------------
 
+  /**
+   * 同步读取文件文本内容。
+   *
+   * @param encoding 编码格式，默认为 "utf8"
+   * @returns 文件字符串内容
+   */
   Read(encoding: BufferEncoding = "utf8"): string {
     return fs.readFileSync(this.path, encoding);
   }
 
+  /**
+   * 同步向文件写入文本内容。
+   *
+   * @param str 待写入的字符串
+   * @param options 文件写入配置选项
+   */
   Write(str: string, options?: fs.WriteFileOptions) {
     fs.writeFileSync(this.path, str, options);
   }
 
+  /**
+   * 检查该文件或目录在文件系统中是否存在。
+   */
   IsExist(): boolean {
     return fs.existsSync(this.path);
   }
 
+  /**
+   * 安全获取文件元数据（Stats），发生错误或路径不存在时返回 undefined。
+   * 使用 throwIfNoEntry: false 避免捕获大量异常带来的性能损耗。
+   */
   private static _stat(path: string): fs.Stats | undefined {
     try {
-      return fs.lstatSync(path);
+      return fs.statSync(path, { throwIfNoEntry: false });
     } catch {
       return undefined;
     }
   }
 
+  /**
+   * 检查当前路径是否为一个常规文件。
+   */
   IsFile(): boolean {
     const stats = File._stat(this.path);
     return stats !== undefined && stats.isFile();
   }
 
+  /**
+   * 检查当前路径是否为一个目录。
+   */
   IsDir(): boolean {
     const stats = File._stat(this.path);
     return stats !== undefined && stats.isDirectory();
   }
 
+  /**
+   * 计算文件的哈希摘要（默认使用 MD5）。
+   */
   getHash(hashName?: string): string {
     const hash = crypto.createHash(hashName || "md5");
     hash.update(fs.readFileSync(this.path));
     return hash.digest("hex");
   }
 
+  /**
+   * 获取文件字节大小。
+   */
   getSize(): number {
     return fs.statSync(this.path).size;
   }
 
+  /**
+   * 生成以 file:// 开头的协议 URI 字符串。
+   */
   ToUri(): string {
     return "file://" + this.ToNoProtocolUri();
   }
 
+  /**
+   * 生成无协议头的 URI 编码路径字符串。
+   */
   ToNoProtocolUri(): string {
     return "/" + encodeURIComponent(this.path.replace(/\\/g, "/"));
   }

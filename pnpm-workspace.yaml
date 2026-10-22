@@ -1,5 +1,6 @@
 allowBuilds:
   esbuild: true
+  '@vscode/vsce-sign': true
 
 overrides:
   '@vscode/test-cli>mocha': 12.0.3

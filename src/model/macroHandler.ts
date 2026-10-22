@@ -1,29 +1,46 @@
 /**
- * 把编译器输出的 '#define' 行转成 C/C++ 插件认识的 'NAME=value' 形式。
+ * 把编译器输出的 '#define' 行转成 C/C++ 插件与 Clang 认识的 'NAME=value' 或 'NAME' 形式。
  *
- * 函数式宏（如 '#define __align(x) ...'）只保留宏名，避免把形参写进 defines。
+ * 处理策略：
+ * 1. 对象式宏（如 '#define STM32F407xx 1'）：转换为 'STM32F407xx=1'；
+ * 2. 标志位宏（如 '#define USE_HAL_DRIVER'）：转换为 'USE_HAL_DRIVER'；
+ * 3. 函数式宏（如 '#define __align(x) ...'）：仅保留宏名与形参存根（'__align(x)='），避免把复杂实现体写进宏定义；
+ * 4. 无法解析或多行续行宏返回 undefined，调用方可安全忽略。
  */
-
 export class MacroHandler {
-  /** 普通宏与函数式宏的匹配规则，在实例生命周期内复用 */
-  private regMatchers = {
-    normal_macro: /^#define (\w+) (.*)$/,
-    func_macro: /^#define (\w+\([^)]*\)) (.*)$/,
-  };
+  /** 普通对象式宏匹配规则（值部分可选） */
+  private static readonly OBJECT_MACRO =
+    /^#define\s+([A-Za-z_]\w*)(?:\s+(.*))?$/;
+  /** 函数式宏匹配规则（形参部分包裹在圆括号内） */
+  private static readonly FUNC_MACRO =
+    /^#define\s+([A-Za-z_]\w*\([^)]*\))(?:\s+(.*))?$/;
 
   /**
    * 把一行 '#define' 转换成 defines 表达式。
-   * 无法识别（例如多行宏的续行）时返回 undefined，由调用方跳过。
+   *
+   * @param macro 原始宏定义文本
+   * @returns 规范化的宏定义表达式，无法识别时返回 undefined
    */
   toExpression(macro: string): string | undefined {
-    let mList = this.regMatchers["normal_macro"].exec(macro);
-    if (mList && mList.length > 2) {
-      return `${mList[1]}=${mList[2]}`;
+    const trimmed = macro.trim();
+    if (!trimmed.startsWith("#define")) {
+      return undefined;
     }
 
-    mList = this.regMatchers["func_macro"].exec(macro);
-    if (mList && mList.length > 2) {
-      return `${mList[1]}=`;
+    const funcMatch = MacroHandler.FUNC_MACRO.exec(trimmed);
+    if (funcMatch) {
+      return `${funcMatch[1]}=`;
     }
+
+    const objMatch = MacroHandler.OBJECT_MACRO.exec(trimmed);
+    if (objMatch) {
+      const name = objMatch[1];
+      const val = objMatch[2];
+      return val !== undefined && val.trim().length > 0
+        ? `${name}=${val.trim()}`
+        : name;
+    }
+
+    return undefined;
   }
 }

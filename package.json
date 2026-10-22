@@ -1,23 +1,24 @@
 {
-  "name": "keil-assistant-2026",
-  "displayName": "Keil Assistant 2026",
-  "description": "An assistant for Keil uVision - 2026 fork",
-  "version": "1.7.0",
-  "publisher": "cl",
+  "name": "keil-assistant",
+  "displayName": "Keil Assistant",
+  "description": "An assistant for Keil uVision (ARM & C51) with clangd support and high performance",
+  "version": "2.0.0",
+  "publisher": "in-ci",
   "author": {
-    "name": "cl",
-    "email": "2584456014@qq.com"
+    "name": "in-ci"
   },
   "keywords": [
     "keil",
     "mdk",
     "c51",
     "8051",
-    "stm32"
+    "stm32",
+    "clangd",
+    "embedded"
   ],
-  "homepage": "https://github.com/github0null/keil-assistant",
+  "homepage": "https://github.com/in-ci/keil-assistant",
   "engines": {
-    "vscode": "^1.38.0"
+    "vscode": "^1.85.0"
   },
   "categories": [
     "Programming Languages",
@@ -25,22 +26,22 @@
     "Other"
   ],
   "activationEvents": [
-    "*"
+    "workspaceContains:**/*.uvproj",
+    "workspaceContains:**/*.uvprojx"
   ],
   "icon": "res/icons/icon.png",
   "main": "./dist/extension.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/github0null/keil-assistant.git"
+    "url": "https://github.com/in-ci/keil-assistant.git"
   },
   "bugs": {
-    "url": "https://github.com/github0null/keil-assistant/issues",
-    "email": "2584456014@qq.com"
+    "url": "https://github.com/in-ci/keil-assistant/issues"
   },
   "contributes": {
     "configuration": [
       {
-        "title": "Keil Assistant 2026",
+        "title": "Keil Assistant",
         "properties": {
           "KeilAssistant.C51.Uv4Path": {
             "type": "string",
@@ -115,14 +116,6 @@
         }
       },
       {
-        "command": "project.rebuild",
-        "title": "Rebuild",
-        "icon": {
-          "light": "./res/icons/BuildSolution_16x.svg",
-          "dark": "./res/icons/BuildSolution_16x.svg"
-        }
-      },
-      {
         "command": "project.download",
         "title": "Download To Device",
         "icon": {
@@ -134,8 +127,16 @@
         "command": "project.buildAndDownload",
         "title": "Build And Download",
         "icon": {
-          "light": "./res/icons/TransferDownload_16x.svg",
-          "dark": "./res/icons/TransferDownload_16x.svg"
+          "light": "./res/icons/BuildAndDownload_16x.svg",
+          "dark": "./res/icons/BuildAndDownload_16x.svg"
+        }
+      },
+      {
+        "command": "project.rebuild",
+        "title": "Rebuild",
+        "icon": {
+          "light": "./res/icons/BuildSolution_16x.svg",
+          "dark": "./res/icons/BuildSolution_16x.svg"
         }
       },
       {
@@ -175,22 +176,22 @@
         },
         {
           "command": "project.build",
-          "group": "inline",
-          "when": "viewItem == Target"
-        },
-        {
-          "command": "project.rebuild",
-          "group": "inline",
+          "group": "inline@1",
           "when": "viewItem == Target"
         },
         {
           "command": "project.download",
-          "group": "inline",
+          "group": "inline@2",
+          "when": "viewItem == Target"
+        },
+        {
+          "command": "project.rebuild",
+          "group": "inline@3",
           "when": "viewItem == Target"
         },
         {
           "command": "project.buildAndDownload",
-          "group": "inline",
+          "group": "inline@4",
           "when": "viewItem == Target"
         },
         {
@@ -206,12 +207,12 @@
         "key": "f7"
       },
       {
-        "command": "project.rebuild",
-        "key": "ctrl+alt+f7"
-      },
-      {
         "command": "project.download",
         "key": "ctrl+alt+d"
+      },
+      {
+        "command": "project.rebuild",
+        "key": "ctrl+alt+f7"
       },
       {
         "command": "project.buildAndDownload",
@@ -254,7 +255,7 @@
         {
           "id": "project",
           "icon": "",
-          "name": "Keil uVision 2026 Project"
+          "name": "Keil uVision Project"
         }
       ]
     },
@@ -312,17 +313,19 @@
     "vscode:prepublish": "webpack --mode production",
     "webpack": "webpack --mode development",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --type-aware src lib",
+    "lint": "oxlint --type-aware src",
     "check": "pnpm run typecheck && pnpm run lint",
-    "test": "pnpm run vscode:prepublish && vscode-test"
+    "test": "pnpm run vscode:prepublish && vscode-test",
+    "package": "pnpm run check && vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^24.19.2",
-    "@types/vscode": "1.140.0",
+    "@types/vscode": "~1.85.0",
     "@types/xml2js": "^0.4.14",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
     "esbuild-loader": "^4.5.0",
     "glob": "^13.0.6",
     "mocha": "^12.0.3",

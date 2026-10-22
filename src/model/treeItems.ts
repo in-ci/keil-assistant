@@ -1,4 +1,4 @@
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { IView, getIconPair } from "../common/tree";
 
 /**
@@ -84,6 +84,14 @@ export class Source implements IView {
     return icons;
   }
 
+  /**
+   * 构造源码节点。
+   *
+   * @param pID 所属工程全局唯一 ID
+   * @param f 目标源文件 File 实例
+   * @param _enable 是否参与编译构建
+   * @param _checkExists 是否检查物理文件是否存在（源文件检查，生成的依赖文件无需检查）
+   */
   constructor(
     pID: string,
     f: File,
@@ -98,6 +106,9 @@ export class Source implements IView {
     this.tooltip = f.path;
   }
 
+  /**
+   * 根据文件后缀名匹配专属图标标识。
+   */
   private getIconBySuffix(suffix: string): string {
     switch (suffix) {
       case ".c":
@@ -129,10 +140,16 @@ export class Source implements IView {
   }
 
   hasChildViews(): boolean {
-    return this._children !== undefined || this.refPaths !== undefined;
+    return (
+      (this._children !== undefined && this._children.length > 0) ||
+      (this.refPaths !== undefined && this.refPaths.length > 0)
+    );
   }
 }
 
+/**
+ * 树视图中的文件组节点（对应 Keil 工程中的 Groups/Group）。
+ */
 export class FileGroup implements IView {
   label: string;
   prjID: string;
@@ -141,8 +158,16 @@ export class FileGroup implements IView {
   icons?: { light: string; dark: string };
 
   //----
+  /** 该分组内包含的源码节点列表 */
   sources: Source[];
 
+  /**
+   * 构造文件分组节点。
+   *
+   * @param pID 所属工程 ID
+   * @param gName 分组名称
+   * @param disabled 分组是否被禁用参与构建
+   */
   constructor(pID: string, gName: string, disabled: boolean) {
     this.label = gName;
     this.prjID = pID;
@@ -152,10 +177,16 @@ export class FileGroup implements IView {
     this.icons = getIconPair(iconName);
   }
 
+  /**
+   * 获取子视图（该分组下的所有源码节点）。
+   */
   getChildViews(): IView[] | undefined {
     return this.sources;
   }
 
+  /**
+   * 分组节点始终允许展开。
+   */
   hasChildViews(): boolean {
     return true;
   }

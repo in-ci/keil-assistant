@@ -1,6 +1,6 @@
 import * as node_path from "path";
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 
 /**
  * 工程配置 / 工作区配置共用的文件名，统一放在 `.vscode` 目录下。
