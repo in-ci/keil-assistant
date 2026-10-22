@@ -4,8 +4,7 @@ import * as event from "events";
 import * as fs from "fs";
 import * as node_path from "path";
 
-import { File } from "../../lib/node_utility/File";
-import { FileWatcher } from "../../lib/node_utility/FileWatcher";
+import { File, FileWatcher } from "../filesystem";
 import { ProjectConfig } from "../config/projectConfig";
 import type { RuntimePaths } from "../config/projectConfig";
 import type { WorkspaceRootInfo } from "../config/workspaceConfig";

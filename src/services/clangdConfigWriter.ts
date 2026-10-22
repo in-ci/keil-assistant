@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as node_path from "path";
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import type { CppConfiguration } from "../model/cppProperties";
 import { isCppProperties } from "../model/cppProperties";
 

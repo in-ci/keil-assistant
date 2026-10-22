@@ -4,7 +4,7 @@ import * as node_path from "path";
 // 允许在配置里使用 ${workspaceFolder} 等变量
 import vscodeVariablesModule = require("vscode-variables");
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { ResourceManager } from "../ResourceManager";
 import { getMD5, openWorkspaceFolder, isWorkspaceFolderOpen } from "../common/util";
 import { IView } from "../common/tree";

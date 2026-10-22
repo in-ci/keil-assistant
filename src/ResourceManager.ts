@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { File } from "../lib/node_utility/File";
+import { File } from "./filesystem";
 
 let _instance: ResourceManager | undefined;
 

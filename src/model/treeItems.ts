@@ -1,4 +1,4 @@
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { IView, getIconPair } from "../common/tree";
 
 /**

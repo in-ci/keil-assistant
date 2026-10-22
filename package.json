@@ -313,7 +313,7 @@
     "vscode:prepublish": "webpack --mode production",
     "webpack": "webpack --mode development",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --type-aware src lib",
+    "lint": "oxlint --type-aware src",
     "check": "pnpm run typecheck && pnpm run lint",
     "test": "pnpm run vscode:prepublish && vscode-test",
     "package": "pnpm run check && vsce package --no-dependencies"

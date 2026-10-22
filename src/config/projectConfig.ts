@@ -1,6 +1,6 @@
 import * as node_path from "path";
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import {
   PROJECT_CONFIG_FILE_NAME,
   WORKSPACE_ROOT_KEY,

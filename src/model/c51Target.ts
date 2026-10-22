@@ -1,6 +1,6 @@
 import * as node_path from "path";
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { ResourceManager } from "../ResourceManager";
 import {
   XmlNode,

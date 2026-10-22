@@ -1,7 +1,7 @@
 import * as node_path from "path";
 import * as child_process from "child_process";
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { ResourceManager } from "../ResourceManager";
 import { CmdLineHandler } from "../CmdLineHandler";
 import {

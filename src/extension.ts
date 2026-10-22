@@ -30,7 +30,7 @@ export {
   DEFAULT_VSCODE_SETTINGS,
   VSCODE_SETTINGS_FILE_NAME,
 } from "./services/vscodeSettingsWriter";
-export { File } from "../lib/node_utility/File";
+export { File } from "./filesystem";
 export { ArmTarget } from "./model/armTarget";
 export { CmdLineHandler } from "./common/cmdLineHandler";
 export { formatTimestamp } from "./common/util";

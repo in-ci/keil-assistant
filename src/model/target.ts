@@ -3,7 +3,7 @@ import * as event from "events";
 import * as fs from "fs";
 import * as node_path from "path";
 
-import { File } from "../../lib/node_utility/File";
+import { File } from "../filesystem";
 import { ResourceManager } from "../ResourceManager";
 import { CmdLineHandler } from "../common/cmdLineHandler";
 import { IView, getIconPair } from "../common/tree";
